@@ -7,6 +7,7 @@ import LoginPage from "./pages/LoginPage";
 import AgendaPage from "./pages/AgendaPage";
 import CheckinPage from "./pages/CheckinPage";
 import ImportacaoPage from "./pages/ImportacaoPage";
+import ClientesPage from "./pages/ClientesPage";
 
 const qc = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -19,21 +20,56 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function DashboardPlaceholder() {
   const usuario = useAuthStore((s) => s.usuario);
-  return (
-    <div className="p-6">
-      <h1 className="text-xl font-semibold text-white mb-2">
-        Olá, {usuario?.nome?.split(" ")[0]} 👋
-      </h1>
-      <p className="text-slate-400 text-sm">Dashboard em desenvolvimento.</p>
-    </div>
-  );
-}
+  const papel   = usuario?.papel || "";
 
-function ClientesPlaceholder() {
+  const isESN = papel === "ESN";
+
   return (
-    <div className="p-6">
-      <h1 className="text-xl font-semibold text-white mb-2">Clientes</h1>
-      <p className="text-slate-400 text-sm">Listagem de clientes em desenvolvimento.</p>
+    <div className="p-6 animate-fade-in">
+      <div className="mb-6">
+        <h1 className="text-xl font-bold text-slate-900">
+          Olá, {usuario?.nome?.split(" ")[0]} 👋
+        </h1>
+        <p className="text-slate-500 text-sm mt-1">
+          {isESN ? "Veja sua agenda e faça seus check-ins hoje." : "Acompanhe a carteira e o desempenho da equipe."}
+        </p>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {isESN ? (
+          <>
+            <div className="kpi col-span-2">
+              <div className="kpi-value text-indigo-600">0</div>
+              <div className="kpi-label">Visitas hoje</div>
+            </div>
+            <div className="kpi col-span-2">
+              <div className="kpi-value">0</div>
+              <div className="kpi-label">Clientes na carteira</div>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="kpi">
+              <div className="kpi-value text-indigo-600">0</div>
+              <div className="kpi-label">Visitas hoje</div>
+            </div>
+            <div className="kpi">
+              <div className="kpi-value text-emerald-600">0</div>
+              <div className="kpi-label">Concluídas</div>
+            </div>
+            <div className="kpi">
+              <div className="kpi-value">0</div>
+              <div className="kpi-label">Em campo</div>
+            </div>
+            <div className="kpi">
+              <div className="kpi-value text-amber-500">0</div>
+              <div className="kpi-label">S/ visita</div>
+            </div>
+          </>
+        )}
+      </div>
+      <p className="text-center text-slate-400 text-xs mt-10">
+        Dashboard com dados reais em breve.
+      </p>
     </div>
   );
 }
@@ -41,8 +77,21 @@ function ClientesPlaceholder() {
 function MapaPlaceholder() {
   return (
     <div className="p-6">
-      <h1 className="text-xl font-semibold text-white mb-2">Mapa ao Vivo</h1>
-      <p className="text-slate-400 text-sm">Mapa de localização dos vendedores em desenvolvimento.</p>
+      <h1 className="text-xl font-bold text-slate-900 mb-2">Mapa ao Vivo</h1>
+      <div className="card p-10 text-center">
+        <p className="text-slate-400 text-sm">Mapa de localização dos vendedores em desenvolvimento.</p>
+      </div>
+    </div>
+  );
+}
+
+function ConfiguracoesPlaceholder() {
+  return (
+    <div className="p-6">
+      <h1 className="text-xl font-bold text-slate-900 mb-2">Configurações</h1>
+      <div className="card p-10 text-center">
+        <p className="text-slate-400 text-sm">Parâmetros e regras de visita em desenvolvimento.</p>
+      </div>
     </div>
   );
 }
@@ -62,11 +111,12 @@ export default function App() {
             }
           >
             <Route index element={<DashboardPlaceholder />} />
-            <Route path="agenda" element={<AgendaPage />} />
-            <Route path="checkin" element={<CheckinPage />} />
-            <Route path="mapa" element={<MapaPlaceholder />} />
-            <Route path="clientes" element={<ClientesPlaceholder />} />
-            <Route path="importacao" element={<ImportacaoPage />} />
+            <Route path="agenda"        element={<AgendaPage />} />
+            <Route path="checkin"       element={<CheckinPage />} />
+            <Route path="mapa"          element={<MapaPlaceholder />} />
+            <Route path="clientes"      element={<ClientesPage />} />
+            <Route path="importacao"    element={<ImportacaoPage />} />
+            <Route path="configuracoes" element={<ConfiguracoesPlaceholder />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
@@ -75,10 +125,12 @@ export default function App() {
         position="top-right"
         toastOptions={{
           style: {
-            background: "#1e293b",
-            color: "#f8fafc",
-            border: "1px solid #334155",
+            background: "#fff",
+            color: "#0f172a",
+            border: "1px solid #e2e8f0",
             fontSize: "13px",
+            borderRadius: "12px",
+            boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
           },
         }}
       />
