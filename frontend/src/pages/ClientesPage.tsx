@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../services/api";
 import type { Cliente, Usuario } from "../types";
@@ -26,6 +27,7 @@ const getEstatisticas = () =>
 
 export default function ClientesPage() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [busca, setBusca] = useState("");
   const [filtroStatus, setFiltroStatus] = useState<"todos" | "pendentes" | "atribuidos">("todos");
   const [clienteAtribuindo, setClienteAtribuindo] = useState<Cliente | null>(null);
@@ -200,7 +202,7 @@ export default function ClientesPage() {
                       {c.codigo_externo}
                     </td>
                     <td className="px-4 py-3">
-                      <p className="font-medium text-slate-900">{c.razao_social}</p>
+                      <button onClick={() => navigate(`/clientes/${c.id}`)} className="font-medium text-slate-900 hover:text-indigo-600 transition-colors text-left">{c.razao_social}</button>
                       {c.cnpj && (
                         <p className="text-xs text-slate-400 mt-0.5 font-mono">
                           {c.cnpj.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5")}
