@@ -269,6 +269,7 @@ async def detalhe_cliente(
                 "valor_mensal": float(ct.valor_mensal) if ct.valor_mensal else None,
                 "data_assinatura": str(ct.data_assinatura) if ct.data_assinatura else None,
                 "data_vigencia_fim": str(ct.data_vigencia_fim) if ct.data_vigencia_fim else None,
+                "data_renovacao": str(ct.data_renovacao) if ct.data_renovacao else None,
             }
             for ct in contratos
         ],
@@ -469,5 +470,42 @@ async def importar_csv(
         }
     finally:
         os.unlink(tmp_path)
+
+
+@router.get("/contratos/{contrato_id}/itens", tags=["contratos"])
+async def itens_contrato(
+    contrato_id: UUID,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import text
+    result = await db.execute(
+        text("""
+            SELECT id, codigo_produto, descricao_produto, agrupador, grupo,
+                   quantidade, valor_unitario, valor_total, recorrente,
+                   modalidade, data_vencimento
+            FROM itens_contrato
+            WHERE contrato_id = :cid
+            ORDER BY recorrente DESC, valor_total DESC
+        """),
+        {"cid": str(contrato_id)}
+    )
+    rows = result.fetchall()
+    return [
+        {
+            "id": str(r[0]),
+            "codigo_produto": r[1],
+            "descricao_produto": r[2],
+            "agrupador": r[3],
+            "grupo": r[4],
+            "quantidade": float(r[5]) if r[5] else 1,
+            "valor_unitario": float(r[6]) if r[6] else 0,
+            "valor_total": float(r[7]) if r[7] else 0,
+            "recorrente": r[8],
+            "modalidade": r[9],
+            "data_vencimento": str(r[10]) if r[10] else None,
+        }
+        for r in rows
+    ]
 
 app.include_router(router)
