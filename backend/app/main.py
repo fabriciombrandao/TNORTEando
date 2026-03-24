@@ -472,6 +472,61 @@ async def importar_csv(
         os.unlink(tmp_path)
 
 
+@router.get("/contratos/{contrato_id}/propostas", tags=["contratos"])
+async def propostas_contrato(
+    contrato_id: UUID,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import text
+    # Buscar propostas com seus itens
+    res_p = await db.execute(text("""
+        SELECT id, numero_proposta, planilha_financeira,
+               data_assinatura, modalidade, valor_total, valor_recorrente
+        FROM propostas_contrato
+        WHERE contrato_id = :cid
+        ORDER BY valor_recorrente DESC, valor_total DESC
+    """), {"cid": str(contrato_id)})
+    propostas = res_p.fetchall()
+
+    resultado = []
+    for p in propostas:
+        res_i = await db.execute(text("""
+            SELECT id, codigo_produto, descricao_produto, agrupador,
+                   quantidade, valor_unitario, valor_total, recorrente,
+                   modalidade, data_vencimento
+            FROM itens_contrato
+            WHERE proposta_id = :pid
+            ORDER BY recorrente DESC, valor_total DESC
+        """), {"pid": str(p[0])})
+        itens = res_i.fetchall()
+
+        resultado.append({
+            "id": str(p[0]),
+            "numero_proposta": p[1],
+            "planilha_financeira": p[2],
+            "data_assinatura": str(p[3]) if p[3] else None,
+            "modalidade": p[4],
+            "valor_total": float(p[5]) if p[5] else 0,
+            "valor_recorrente": float(p[6]) if p[6] else 0,
+            "itens": [
+                {
+                    "id": str(i[0]),
+                    "codigo_produto": i[1],
+                    "descricao_produto": i[2],
+                    "agrupador": i[3],
+                    "quantidade": float(i[4]) if i[4] else 1,
+                    "valor_unitario": float(i[5]) if i[5] else 0,
+                    "valor_total": float(i[6]) if i[6] else 0,
+                    "recorrente": i[7],
+                    "modalidade": i[8],
+                    "data_vencimento": str(i[9]) if i[9] else None,
+                }
+                for i in itens
+            ]
+        })
+    return resultado
+
 @router.get("/contratos/{contrato_id}/itens", tags=["contratos"])
 async def itens_contrato(
     contrato_id: UUID,
@@ -479,17 +534,14 @@ async def itens_contrato(
     db: AsyncSession = Depends(get_db),
 ):
     from sqlalchemy import text
-    result = await db.execute(
-        text("""
-            SELECT id, codigo_produto, descricao_produto, agrupador, grupo,
-                   quantidade, valor_unitario, valor_total, recorrente,
-                   modalidade, data_vencimento
-            FROM itens_contrato
-            WHERE contrato_id = :cid
-            ORDER BY recorrente DESC, valor_total DESC
-        """),
-        {"cid": str(contrato_id)}
-    )
+    result = await db.execute(text("""
+        SELECT id, codigo_produto, descricao_produto, agrupador, grupo,
+               quantidade, valor_unitario, valor_total, recorrente,
+               modalidade, data_vencimento
+        FROM itens_contrato
+        WHERE contrato_id = :cid
+        ORDER BY recorrente DESC, valor_total DESC
+    """), {"cid": str(contrato_id)})
     rows = result.fetchall()
     return [
         {
