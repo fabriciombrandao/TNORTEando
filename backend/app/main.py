@@ -1,9 +1,9 @@
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy import select
-from pydantic import BaseModel, EmailStr
+from sqlalchemy import select, func
+from pydantic import BaseModel
 from typing import Optional, List
 from uuid import UUID
 from datetime import date
@@ -11,23 +11,18 @@ import tempfile, os
 
 from app.core.config import settings
 from app.core.security import verify_password, create_access_token, create_refresh_token, decode_token
-from app.models.models import Base, Usuario, PapelUsuario
-from app.services.visita_service import VisitaService
-from app.services.agenda_service import AgendaService
-from app.services.importador_csv import ImportadorCSV
+from app.models.models import Base, Usuario, PapelUsuario, Cliente, Contrato, Visita, StatusVisita
 
 # ─────────────────────────────────────────────
-# DB Setup
+# DB
 # ─────────────────────────────────────────────
 
 engine = create_async_engine(settings.DATABASE_URL, echo=False)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
-
 async def get_db():
     async with AsyncSessionLocal() as session:
         yield session
-
 
 # ─────────────────────────────────────────────
 # App
@@ -43,12 +38,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 @app.on_event("startup")
 async def startup():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-
 
 # ─────────────────────────────────────────────
 # Auth
@@ -56,7 +49,6 @@ async def startup():
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 router = APIRouter(prefix="/api/v1")
-
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
@@ -70,13 +62,11 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="Usuário não encontrado ou inativo.")
     return user
 
-
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
     usuario: dict
-
 
 @router.post("/auth/login", response_model=TokenResponse, tags=["auth"])
 async def login(form: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
@@ -91,6 +81,219 @@ async def login(form: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = 
         usuario={"id": str(user.id), "nome": user.nome, "papel": user.papel, "email": user.email},
     )
 
+@router.get("/auth/me", tags=["auth"])
+async def me(current_user: Usuario = Depends(get_current_user)):
+    return {
+        "id": str(current_user.id),
+        "nome": current_user.nome,
+        "email": current_user.email,
+        "papel": current_user.papel,
+        "codigo_externo": current_user.codigo_externo,
+    }
+
+# ─────────────────────────────────────────────
+# Health
+# ─────────────────────────────────────────────
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+# ─────────────────────────────────────────────
+# Usuarios
+# ─────────────────────────────────────────────
+
+@router.get("/usuarios", tags=["usuarios"])
+async def listar_usuarios(
+    papel: Optional[str] = None,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(Usuario).where(Usuario.ativo == True).order_by(Usuario.nome)
+    if papel:
+        try:
+            papel_enum = PapelUsuario(papel.upper())
+            stmt = stmt.where(Usuario.papel == papel_enum)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Papel inválido: {papel}")
+    result = await db.execute(stmt)
+    usuarios = result.scalars().all()
+    return [
+        {
+            "id": str(u.id),
+            "codigo_externo": u.codigo_externo,
+            "nome": u.nome,
+            "email": u.email,
+            "papel": u.papel,
+            "telefone": u.telefone,
+            "ativo": u.ativo,
+        }
+        for u in usuarios
+    ]
+
+@router.get("/usuarios/me", tags=["usuarios"])
+async def meu_perfil(current_user: Usuario = Depends(get_current_user)):
+    return {
+        "id": str(current_user.id),
+        "codigo_externo": current_user.codigo_externo,
+        "nome": current_user.nome,
+        "email": current_user.email,
+        "papel": current_user.papel,
+        "telefone": current_user.telefone,
+        "ativo": current_user.ativo,
+    }
+
+# ─────────────────────────────────────────────
+# Clientes
+# ─────────────────────────────────────────────
+
+@router.get("/clientes", tags=["clientes"])
+async def listar_clientes(
+    busca: Optional[str] = None,
+    filtro: Optional[str] = None,
+    uf: Optional[str] = None,
+    apenas_ativos: bool = True,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(Cliente)
+    if current_user.papel == PapelUsuario.ESN:
+        stmt = stmt.where(Cliente.vendedor_responsavel_id == current_user.id)
+    if apenas_ativos:
+        stmt = stmt.where(Cliente.ativo == True)
+    if filtro == "pendentes":
+        from app.models.models import StatusAtribuicao
+        stmt = stmt.where(Cliente.status_atribuicao == StatusAtribuicao.PENDENTE)
+    elif filtro == "atribuidos":
+        from app.models.models import StatusAtribuicao
+        stmt = stmt.where(Cliente.status_atribuicao == StatusAtribuicao.ATRIBUIDO)
+    if busca:
+        like = f"%{busca}%"
+        stmt = stmt.where(
+            Cliente.razao_social.ilike(like) |
+            Cliente.codigo_externo.ilike(like) |
+            Cliente.municipio.ilike(like) |
+            Cliente.cnpj.ilike(like)
+        )
+    if uf:
+        stmt = stmt.where(Cliente.uf == uf.upper())
+    stmt = stmt.order_by(Cliente.razao_social)
+    result = await db.execute(stmt)
+    clientes = result.scalars().all()
+    return [
+        {
+            "id": str(c.id),
+            "codigo_externo": c.codigo_externo,
+            "razao_social": c.razao_social,
+            "cnpj": c.cnpj,
+            "segmento": c.segmento,
+            "sub_segmento": c.sub_segmento,
+            "municipio": c.municipio,
+            "uf": c.uf,
+            "lat": c.lat,
+            "lng": c.lng,
+            "setor_publico": c.setor_publico,
+            "status_atribuicao": c.status_atribuicao,
+            "status_cliente": c.status_cliente,
+            "classificacao_abc": c.classificacao_abc,
+            "vendedor_responsavel_id": str(c.vendedor_responsavel_id) if c.vendedor_responsavel_id else None,
+            "ativo": c.ativo,
+        }
+        for c in clientes
+    ]
+
+@router.get("/clientes/estatisticas", tags=["clientes"])
+async def estatisticas_clientes(
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(Cliente).where(Cliente.ativo == True)
+    if current_user.papel == PapelUsuario.ESN:
+        stmt = stmt.where(Cliente.vendedor_responsavel_id == current_user.id)
+    result = await db.execute(stmt)
+    todos = result.scalars().all()
+    from app.models.models import StatusAtribuicao
+    return {
+        "total": len(todos),
+        "atribuidos": sum(1 for c in todos if c.status_atribuicao == StatusAtribuicao.ATRIBUIDO),
+        "pendentes": sum(1 for c in todos if c.status_atribuicao == StatusAtribuicao.PENDENTE),
+    }
+
+@router.get("/clientes/{cliente_id}", tags=["clientes"])
+async def detalhe_cliente(
+    cliente_id: UUID,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    cliente = await db.get(Cliente, cliente_id)
+    if not cliente or not cliente.ativo:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado.")
+    if current_user.papel == PapelUsuario.ESN:
+        if str(cliente.vendedor_responsavel_id) != str(current_user.id):
+            raise HTTPException(status_code=403, detail="Acesso negado.")
+
+    # Buscar contratos
+    stmt_c = select(Contrato).where(Contrato.cliente_id == cliente_id).order_by(Contrato.criado_em.desc())
+    res_c = await db.execute(stmt_c)
+    contratos = res_c.scalars().all()
+
+    return {
+        "id": str(cliente.id),
+        "codigo_externo": cliente.codigo_externo,
+        "razao_social": cliente.razao_social,
+        "cnpj": cliente.cnpj,
+        "segmento": cliente.segmento,
+        "sub_segmento": cliente.sub_segmento,
+        "municipio": cliente.municipio,
+        "uf": cliente.uf,
+        "lat": cliente.lat,
+        "lng": cliente.lng,
+        "setor_publico": cliente.setor_publico,
+        "status_atribuicao": cliente.status_atribuicao,
+        "status_cliente": cliente.status_cliente,
+        "classificacao_abc": cliente.classificacao_abc,
+        "frequencia_visita_dias": cliente.frequencia_visita_dias,
+        "ultima_visita_em": cliente.ultima_visita_em,
+        "proxima_visita_prevista": cliente.proxima_visita_prevista,
+        "observacoes": cliente.observacoes,
+        "vendedor_responsavel_id": str(cliente.vendedor_responsavel_id) if cliente.vendedor_responsavel_id else None,
+        "ativo": cliente.ativo,
+        "contratos": [
+            {
+                "id": str(ct.id),
+                "numero_contrato": ct.numero_contrato,
+                "status": ct.status,
+                "recorrente": ct.recorrente,
+                "modalidade": ct.modalidade,
+                "produto_principal": ct.produto_principal,
+                "valor_mensal": float(ct.valor_mensal) if ct.valor_mensal else None,
+                "data_assinatura": str(ct.data_assinatura) if ct.data_assinatura else None,
+                "data_vigencia_fim": str(ct.data_vigencia_fim) if ct.data_vigencia_fim else None,
+            }
+            for ct in contratos
+        ],
+    }
+
+@router.patch("/clientes/{cliente_id}/atribuir", tags=["clientes"])
+async def atribuir_vendedor(
+    cliente_id: UUID,
+    body: dict,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if current_user.papel not in (PapelUsuario.GESTOR_EMPRESA, PapelUsuario.DSN, PapelUsuario.GSN):
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+    cliente = await db.get(Cliente, cliente_id)
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado.")
+    vendedor = await db.get(Usuario, UUID(body["vendedor_id"]))
+    if not vendedor or vendedor.papel != PapelUsuario.ESN:
+        raise HTTPException(status_code=400, detail="Vendedor inválido.")
+    from app.models.models import StatusAtribuicao
+    cliente.vendedor_responsavel_id = vendedor.id
+    cliente.status_atribuicao = StatusAtribuicao.ATRIBUIDO
+    await db.commit()
+    return {"ok": True, "vendedor_nome": vendedor.nome}
 
 # ─────────────────────────────────────────────
 # Visitas
@@ -102,12 +305,10 @@ class CheckinRequest(BaseModel):
     lng: float
     agenda_item_id: Optional[UUID] = None
 
-
 class CheckoutRequest(BaseModel):
     lat: float
     lng: float
     observacoes: Optional[str] = None
-
 
 @router.post("/visitas/checkin", tags=["visitas"])
 async def checkin(
@@ -116,6 +317,7 @@ async def checkin(
     db: AsyncSession = Depends(get_db),
 ):
     try:
+        from app.services.visita_service import VisitaService
         visita = await VisitaService.checkin(
             db, current_user.id, body.cliente_id,
             body.lat, body.lng, body.agenda_item_id
@@ -123,7 +325,6 @@ async def checkin(
         return {"visita_id": str(visita.id), "checkin_em": visita.checkin_em}
     except (ValueError, PermissionError) as e:
         raise HTTPException(status_code=400, detail=str(e))
-
 
 @router.post("/visitas/{visita_id}/checkout", tags=["visitas"])
 async def checkout(
@@ -133,6 +334,7 @@ async def checkout(
     db: AsyncSession = Depends(get_db),
 ):
     try:
+        from app.services.visita_service import VisitaService
         visita = await VisitaService.checkout(
             db, visita_id, current_user.id,
             body.lat, body.lng, body.observacoes
@@ -140,20 +342,16 @@ async def checkout(
         return {
             "visita_id": str(visita.id),
             "checkout_em": visita.checkout_em,
-            "duracao_minutos": int(
-                (visita.checkout_em - visita.checkin_em).total_seconds() / 60
-            ),
+            "duracao_minutos": int((visita.checkout_em - visita.checkin_em).total_seconds() / 60),
         }
     except (ValueError, PermissionError) as e:
         raise HTTPException(status_code=400, detail=str(e))
-
 
 @router.get("/visitas/em-andamento", tags=["visitas"])
 async def visita_em_andamento(
     current_user: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    from app.models.models import Visita, StatusVisita
     stmt = select(Visita).where(
         Visita.vendedor_id == current_user.id,
         Visita.status == StatusVisita.EM_ANDAMENTO,
@@ -169,7 +367,6 @@ async def visita_em_andamento(
         "checkin_em": visita.checkin_em,
     }
 
-
 # ─────────────────────────────────────────────
 # Agenda
 # ─────────────────────────────────────────────
@@ -180,7 +377,6 @@ class AgendaManualRequest(BaseModel):
     horario_inicio: str = "08:00"
     duracao_padrao_min: int = 45
 
-
 class AgendaOtimizadaRequest(BaseModel):
     data: date
     cliente_ids: List[UUID]
@@ -189,19 +385,18 @@ class AgendaOtimizadaRequest(BaseModel):
     horario_inicio: str = "08:00"
     duracao_padrao_min: int = 45
 
-
 @router.post("/agenda/manual", tags=["agenda"])
 async def criar_agenda_manual(
     body: AgendaManualRequest,
     current_user: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from app.services.agenda_service import AgendaService
     agenda = await AgendaService.criar_agenda_manual(
         db, current_user.id, body.data, body.cliente_ids,
         body.horario_inicio, body.duracao_padrao_min,
     )
     return {"agenda_id": str(agenda.id), "data": agenda.data, "total_visitas": len(agenda.itens)}
-
 
 @router.post("/agenda/otimizada", tags=["agenda"])
 async def criar_agenda_otimizada(
@@ -209,18 +404,19 @@ async def criar_agenda_otimizada(
     current_user: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from app.services.agenda_service import AgendaService
     agenda = await AgendaService.gerar_roteiro_otimizado(
         db, current_user.id, body.data, body.cliente_ids,
         body.lat_inicio, body.lng_inicio, body.horario_inicio, body.duracao_padrao_min,
     )
     return {"agenda_id": str(agenda.id), "data": agenda.data, "total_visitas": len(agenda.itens)}
 
-
 @router.get("/agenda/hoje", tags=["agenda"])
 async def agenda_hoje(
     current_user: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    from app.services.agenda_service import AgendaService
     agenda = await AgendaService.buscar_agenda_do_dia(db, current_user.id, date.today())
     if not agenda:
         return {"agenda": None}
@@ -239,7 +435,6 @@ async def agenda_hoje(
         ],
     }
 
-
 # ─────────────────────────────────────────────
 # Importação CSV
 # ─────────────────────────────────────────────
@@ -252,19 +447,16 @@ async def importar_csv(
 ):
     if current_user.papel not in (PapelUsuario.GESTOR_EMPRESA, PapelUsuario.DSN):
         raise HTTPException(status_code=403, detail="Apenas gestores e diretores podem importar.")
-
     with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
         tmp.write(await file.read())
         tmp_path = tmp.name
-
     try:
+        from app.services.importador_csv import ImportadorCSV
         importador = ImportadorCSV(tmp_path)
         objetos, resultado = importador.executar()
-
         for obj in objetos:
             db.add(obj)
         await db.commit()
-
         return {
             "sucesso": True,
             "organizacoes_criadas": resultado.organizacoes_criadas,
@@ -272,54 +464,10 @@ async def importar_csv(
             "vinculos_criados": resultado.vinculos_criados,
             "clientes_criados": resultado.clientes_criados,
             "contratos_criados": resultado.contratos_criados,
-            "clientes_orfaos": resultado.clientes_orfaos,
-            "clientes_sem_municipio": resultado.clientes_sem_municipio,
             "avisos": resultado.avisos,
             "erros": resultado.erros,
         }
     finally:
         os.unlink(tmp_path)
-
-
-# ─────────────────────────────────────────────
-# Clientes
-# ─────────────────────────────────────────────
-
-@router.get("/clientes", tags=["clientes"])
-async def listar_clientes(
-    current_user: Usuario = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-    apenas_ativos: bool = True,
-):
-    from app.models.models import Cliente
-    stmt = select(Cliente)
-    if current_user.papel == PapelUsuario.ESN:
-        stmt = stmt.where(Cliente.vendedor_responsavel_id == current_user.id)
-    if apenas_ativos:
-        stmt = stmt.where(Cliente.ativo == True)
-    result = await db.execute(stmt)
-    clientes = result.scalars().all()
-    return [
-    {
-        "id": str(c.id),
-        "codigo_externo": c.codigo_externo,
-        "razao_social": c.razao_social,
-        "cnpj": c.cnpj,
-        "segmento": c.segmento,
-        "sub_segmento": c.sub_segmento,
-        "municipio": c.municipio,
-        "uf": c.uf,
-        "lat": c.lat,
-        "lng": c.lng,
-        "setor_publico": c.setor_publico,
-        "status_atribuicao": c.status_atribuicao,
-        "status_cliente": c.status_cliente,
-        "classificacao_abc": c.classificacao_abc,
-        "vendedor_responsavel_id": str(c.vendedor_responsavel_id) if c.vendedor_responsavel_id else None,
-        "ativo": c.ativo,
-    }
-    for c in clientes
-]
-
 
 app.include_router(router)
