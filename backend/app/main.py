@@ -300,18 +300,26 @@ async def listar_clientes(
     result = await db.execute(stmt)
     clientes = result.scalars().all()
     return [
-        {
-            "id": str(c.id),
-            "codigo_externo": c.codigo_externo,
-            "razao_social": c.razao_social,
-            "municipio": c.municipio,
-            "uf": c.uf,
-            "lat": c.lat,
-            "lng": c.lng,
-            "status_atribuicao": c.status_atribuicao,
-        }
-        for c in clientes
-    ]
+    {
+        "id": str(c.id),
+        "codigo_externo": c.codigo_externo,
+        "razao_social": c.razao_social,
+        "cnpj": c.cnpj,
+        "segmento": c.segmento,
+        "sub_segmento": c.sub_segmento,
+        "municipio": c.municipio,
+        "uf": c.uf,
+        "lat": c.lat,
+        "lng": c.lng,
+        "setor_publico": c.setor_publico,
+        "status_atribuicao": c.status_atribuicao,
+        "status_cliente": c.status_cliente,
+        "classificacao_abc": c.classificacao_abc,
+        "vendedor_responsavel_id": str(c.vendedor_responsavel_id) if c.vendedor_responsavel_id else None,
+        "ativo": c.ativo,
+    }
+    for c in clientes
+]
 
 
 app.include_router(router)
