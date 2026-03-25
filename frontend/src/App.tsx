@@ -10,6 +10,7 @@ import ImportacaoPage from "./pages/ImportacaoPage";
 import ClientesPage from "./pages/ClientesPage";
 import ClienteDetalhe from "./pages/ClienteDetalhe";
 import LicenciamentoPage from "./pages/LicenciamentoPage";
+import ContratosPage from "./pages/ContratosPage";
 
 const qc = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -119,6 +120,7 @@ export default function App() {
             <Route path="clientes"      element={<ClientesPage />} />
             <Route path="clientes/:id" element={<ClienteDetalhe />} />
             <Route path="clientes/:id/licenciamento" element={<LicenciamentoPage />} />
+            <Route path="clientes/:id/contratos" element={<ContratosPage />} />
             <Route path="importacao"    element={<ImportacaoPage />} />
             <Route path="configuracoes" element={<ConfiguracoesPlaceholder />} />
           </Route>
