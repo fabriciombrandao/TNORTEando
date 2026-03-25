@@ -586,7 +586,7 @@ async def licenciamento_cliente(
         WHERE ct.cliente_id = :cid
           AND ct.status = 'ATIVO'
         GROUP BY i.codigo_produto, i.descricao_produto, i.recorrente
-        ORDER BY i.recorrente DESC, SUM(i.valor_total) DESC
+        ORDER BY i.recorrente DESC, i.descricao_produto ASC
     """), {"cid": str(cliente_id)})
     rows = res.fetchall()
 
