@@ -560,4 +560,53 @@ async def itens_contrato(
         for r in rows
     ]
 
+
+@router.get("/clientes/{cliente_id}/licenciamento", tags=["clientes"])
+async def licenciamento_cliente(
+    cliente_id: UUID,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import text as sqlt
+
+    cliente = await db.get(Cliente, cliente_id)
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado.")
+
+    # Produtos agrupados por código — apenas contratos ATIVOS
+    res = await db.execute(sqlt("""
+        SELECT
+            i.codigo_produto,
+            i.descricao_produto,
+            i.recorrente,
+            SUM(i.quantidade)   as total_qtd,
+            SUM(i.valor_total)  as total_valor
+        FROM itens_contrato i
+        JOIN contratos ct ON ct.id = i.contrato_id
+        WHERE ct.cliente_id = :cid
+          AND ct.status = 'ATIVO'
+        GROUP BY i.codigo_produto, i.descricao_produto, i.recorrente
+        ORDER BY i.recorrente DESC, SUM(i.valor_total) DESC
+    """), {"cid": str(cliente_id)})
+    rows = res.fetchall()
+
+    recorrentes  = [{"codigo": r[0], "descricao": r[1], "quantidade": float(r[3]), "valor_total": float(r[4])} for r in rows if r[2]]
+    nao_recorrentes = [{"codigo": r[0], "descricao": r[1], "quantidade": float(r[3]), "valor_total": float(r[4])} for r in rows if not r[2]]
+
+    mrr = sum(r["valor_total"] for r in recorrentes)
+    total_licencas = sum(r["quantidade"] for r in recorrentes)
+    total_nao_rec = sum(r["valor_total"] for r in nao_recorrentes)
+
+    return {
+        "cliente_id": str(cliente_id),
+        "razao_social": cliente.razao_social,
+        "cnpj": cliente.cnpj,
+        "mrr": mrr,
+        "total_licencas": int(total_licencas),
+        "total_produtos": len(rows),
+        "total_nao_recorrente": total_nao_rec,
+        "recorrentes": recorrentes,
+        "nao_recorrentes": nao_recorrentes,
+    }
+
 app.include_router(router)
