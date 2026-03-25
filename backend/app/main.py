@@ -245,10 +245,9 @@ async def detalhe_cliente(
             MIN(p.data_assinatura)          as primeira_compra,
             MAX(p.data_assinatura)          as ultima_compra,
             MAX(p.valor_total)              as maior_compra,
-            COUNT(DISTINCT CASE WHEN i.status_cancelamento = 'PROGRAMADO' THEN i.id END) as em_cancelamento
+            0 as em_cancelamento
         FROM propostas_contrato p
         JOIN contratos c ON c.id = p.contrato_id
-        LEFT JOIN itens_contrato i ON i.proposta_id = p.id
         WHERE c.cliente_id = :cid
     """), {"cid": str(cliente_id)})
     row_hv = res_hv.fetchone()
