@@ -237,6 +237,43 @@ async def detalhe_cliente(
     res_c = await db.execute(stmt_c)
     contratos = res_c.scalars().all()
 
+    # Dados histórico de vendas + cancelamentos
+    from sqlalchemy import text as sqlt
+    res_hv = await db.execute(sqlt("""
+        SELECT
+            COUNT(DISTINCT p.id)            as total_vendas,
+            MIN(p.data_assinatura)          as primeira_compra,
+            MAX(p.data_assinatura)          as ultima_compra,
+            MAX(p.valor_total)              as maior_compra,
+            COUNT(DISTINCT CASE WHEN i.status_cancelamento = 'PROGRAMADO' THEN i.id END) as em_cancelamento
+        FROM propostas_contrato p
+        JOIN contratos c ON c.id = p.contrato_id
+        LEFT JOIN itens_contrato i ON i.proposta_id = p.id
+        WHERE c.cliente_id = :cid
+    """), {"cid": str(cliente_id)})
+    row_hv = res_hv.fetchone()
+
+    from datetime import date as dt_date
+    hoje = dt_date.today()
+    primeira = row_hv[1]
+    cliente_ha = None
+    if primeira:
+        anos = (hoje - primeira).days // 365
+        meses = ((hoje - primeira).days % 365) // 30
+        partes = []
+        if anos > 0: partes.append(f"{anos} ano{'s' if anos > 1 else ''}")
+        if meses > 0: partes.append(f"{meses} {'meses' if meses > 1 else 'mês'}")
+        cliente_ha = " e ".join(partes) if partes else "menos de 1 mês"
+
+    historico_vendas = {
+        "total_vendas": row_hv[0] or 0,
+        "primeira_compra": str(row_hv[1]) if row_hv[1] else None,
+        "ultima_compra": str(row_hv[2]) if row_hv[2] else None,
+        "maior_compra": float(row_hv[3]) if row_hv[3] else None,
+        "cliente_ha": cliente_ha,
+        "em_cancelamento": row_hv[4] or 0,
+    }
+
     return {
         "id": str(cliente.id),
         "codigo_externo": cliente.codigo_externo,
@@ -258,6 +295,7 @@ async def detalhe_cliente(
         "observacoes": cliente.observacoes,
         "vendedor_responsavel_id": str(cliente.vendedor_responsavel_id) if cliente.vendedor_responsavel_id else None,
         "ativo": cliente.ativo,
+        "historico_vendas": historico_vendas,
         "contratos": [
             {
                 "id": str(ct.id),
