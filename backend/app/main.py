@@ -520,26 +520,220 @@ async def importar_csv(
 ):
     if current_user.papel not in (PapelUsuario.GESTOR_EMPRESA, PapelUsuario.DSN):
         raise HTTPException(status_code=403, detail="Apenas gestores e diretores podem importar.")
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
         tmp.write(await file.read())
         tmp_path = tmp.name
+
     try:
-        from app.services.importador_csv import ImportadorCSV
-        importador = ImportadorCSV(tmp_path)
-        objetos, resultado = importador.executar()
-        for obj in objetos:
-            db.add(obj)
+        import csv as csv_mod, re, uuid as uuid_mod, hashlib
+        from datetime import date as dt_date
+        from app.core.security import get_password_hash
+        from sqlalchemy import text as sqlt
+
+        def _h(p): return "pbkdf2:" + hashlib.pbkdf2_hmac("sha256", p.encode(), b"salt", 100000).hex()
+        def _cnpj(r):
+            if not r or r.strip() in ("-",""): return None
+            return re.sub(r"[^0-9]","",r) or None
+        def _nulo(v):
+            v=v.strip() if v else ""
+            return v if v and v!="-" else None
+        def _norm(t):
+            if not t or t.strip() in ("-",""): return ""
+            return " ".join(t.strip().title().split())
+        def _bool(v): return v.strip().upper() in ("SIM","S","YES","Y","1")
+        def _fone(ddd, tel):
+            d = (ddd or "").strip().strip("()").strip()
+            t = (tel or "").strip()
+            if not t: return None
+            return f"({d}) {t}" if d else t
+        def _data(s):
+            if not s or s.strip() in ("-",""): return None
+            try:
+                d,m,y = s.strip().split("/")
+                return dt_date(int(y),int(m),int(d))
+            except: return None
+
+        with open(tmp_path, encoding="ISO-8859-1", newline="") as f:
+            rows = list(csv_mod.DictReader(f, delimiter=";"))
+
+        if not rows:
+            raise HTTPException(status_code=400, detail="Arquivo CSV vazio.")
+
+        # Verificar colunas obrigatórias
+        cols_req = ["Código do Cliente","Número do Contrato","Codigo Unidade Responsável pelo Atendimento"]
+        for col in cols_req:
+            if col not in rows[0]:
+                raise HTTPException(status_code=400, detail=f"Coluna não encontrada: {col}")
+
+        # Buscar ou criar organização no banco
+        cod_org = rows[0]["Codigo Unidade Responsável pelo Atendimento"].strip()
+        nom_org = rows[0]["Nome Unidade de Atendimento"].strip()
+
+        res_org = await db.execute(sqlt(
+            "SELECT id FROM organizacoes WHERE codigo_externo=:c"
+        ), {"c": cod_org})
+        org_row = res_org.fetchone()
+
+        if org_row:
+            org_id = str(org_row[0])
+            org_criada = 0
+        else:
+            org_id = str(uuid_mod.uuid4())
+            await db.execute(sqlt(
+                "INSERT INTO organizacoes (id,codigo_externo,nome,ativo) VALUES (:i,:c,:n,true)"
+            ), {"i": org_id, "c": cod_org, "n": nom_org})
+            await db.commit()
+            org_criada = 1
+
+        # Mapas em memória
+        usuarios_map = {}  # codigo -> id
+        emails_map   = {}  # email  -> id
+        res_u = await db.execute(sqlt(
+            "SELECT id, codigo_externo, email FROM usuarios WHERE organizacao_id=:o"
+        ), {"o": org_id})
+        for r in res_u.fetchall():
+            usuarios_map[r[1]] = str(r[0])
+            emails_map[r[2]] = str(r[0])
+
+        usuarios_criados = 0
+        vinculos_criados = 0
+
+        async def get_or_create_usuario(cod, nome, email, papel, ddd="", tel=""):
+            nonlocal usuarios_criados
+            cod = cod.strip()
+            if not cod or cod == "-": return None
+            if cod in usuarios_map: return usuarios_map[cod]
+            email_n = email.strip().lower() if email.strip() not in ("-","") else f"{cod.lower()}@importado.local"
+            if email_n in emails_map:
+                usuarios_map[cod] = emails_map[email_n]
+                return emails_map[email_n]
+            uid = str(uuid_mod.uuid4())
+            await db.execute(sqlt("""
+                INSERT INTO usuarios (id,organizacao_id,codigo_externo,nome,email,senha_hash,papel,telefone,ativo,primeiro_acesso)
+                VALUES (:i,:o,:c,:n,:e,:h,:p,:t,true,true)
+                ON CONFLICT (email) DO NOTHING
+            """), {
+                "i": uid, "o": org_id, "c": cod,
+                "n": _norm(nome) or cod,
+                "e": email_n, "h": _h("Mudar@123"),
+                "p": papel, "t": _fone(ddd, tel),
+            })
+            res_check = await db.execute(sqlt("SELECT id FROM usuarios WHERE email=:e"), {"e": email_n})
+            row_check = res_check.fetchone()
+            if row_check:
+                uid_real = str(row_check[0])
+                usuarios_map[cod] = uid_real
+                emails_map[email_n] = uid_real
+                usuarios_criados += 1
+                return uid_real
+            return None
+
+        vinculos_set = set()
+        async def get_or_create_vinculo(sup_id, sub_id, cod_sub):
+            nonlocal vinculos_criados
+            if not sup_id or not sub_id: return
+            chave = (sup_id, sub_id, cod_sub)
+            if chave in vinculos_set: return
+            vinculos_set.add(chave)
+            await db.execute(sqlt("""
+                INSERT INTO hierarquia_vendas (id,superior_id,subordinado_id,codigo_externo_subordinado,ativo)
+                VALUES (:i,:s,:b,:c,true)
+                ON CONFLICT ON CONSTRAINT uq_hierarquia_vinculo DO NOTHING
+            """), {"i": str(uuid_mod.uuid4()), "s": sup_id, "b": sub_id, "c": cod_sub})
+            vinculos_criados += 1
+
+        clientes_set = set()
+        contratos_set = set()
+        clientes_criados = 0
+        contratos_criados = 0
+
+        for row in rows:
+            dsn_id = await get_or_create_usuario(
+                row["Código do DSN"], row["Nome do DSN"], row["E-mail do DSN"], "DSN",
+                row.get("Código de Área do DSN",""), row.get("Telefone DSN",""))
+            gsn_id = await get_or_create_usuario(
+                row["Código do GSN"], row["Nome do GSN"], row["E-mail do GSN"], "GSN",
+                row.get("Código de Área do GSN",""), row.get("Telefone GSN",""))
+            esn_id = await get_or_create_usuario(
+                row["Código do ESN"], row["Nome do ESN"], row["E-mail do ESN"], "ESN",
+                row.get("Código de Área do ESN",""), row.get("Telefone ESN",""))
+
+            if dsn_id and gsn_id:
+                await get_or_create_vinculo(dsn_id, gsn_id, row["Código do GSN"].strip())
+            if gsn_id and esn_id:
+                await get_or_create_vinculo(gsn_id, esn_id, row["Código do ESN"].strip())
+
+            cod_cli = row["Código do Cliente"].strip()
+            if cod_cli and cod_cli not in clientes_set:
+                clientes_set.add(cod_cli)
+                await db.execute(sqlt("""
+                    INSERT INTO clientes (
+                        id,organizacao_id,vendedor_responsavel_id,codigo_externo,
+                        razao_social,cnpj,municipio,uf,segmento,sub_segmento,
+                        setor_publico,status_atribuicao,status_cliente,
+                        classificacao_abc,frequencia_visita_dias,ativo
+                    ) VALUES (
+                        :i,:o,:v,:c,:r,:cn,:m,:u,:seg,:sub,:sp,:sa,:sc,:abc,30,true
+                    ) ON CONFLICT (codigo_externo) DO UPDATE SET
+                        vendedor_responsavel_id=COALESCE(EXCLUDED.vendedor_responsavel_id, clientes.vendedor_responsavel_id),
+                        segmento=COALESCE(EXCLUDED.segmento, clientes.segmento),
+                        sub_segmento=COALESCE(EXCLUDED.sub_segmento, clientes.sub_segmento)
+                """), {
+                    "i": str(uuid_mod.uuid4()), "o": org_id,
+                    "v": esn_id, "c": cod_cli,
+                    "r": _norm(row["Razão Social do Cliente"]),
+                    "cn": _cnpj(row["CPF ou CNPJ do Cliente"]),
+                    "m": _norm(_nulo(row["Município do Cliente"])),
+                    "u": _nulo(row["UF"]),
+                    "seg": _norm(_nulo(row.get("Segmento do Cliente",""))),
+                    "sub": _norm(_nulo(row.get("Sub Segmento do Cliente",""))),
+                    "sp": _bool(row["Setor Público"]),
+                    "sa": "ATRIBUIDO" if esn_id else "PENDENTE",
+                    "sc": "ATIVO",
+                    "abc": "C",
+                })
+                clientes_criados += 1
+
+            num_ct = row["Número do Contrato"].strip()
+            if num_ct and num_ct not in contratos_set:
+                contratos_set.add(num_ct)
+                res_cli = await db.execute(sqlt("SELECT id FROM clientes WHERE codigo_externo=:c"), {"c": cod_cli})
+                row_cli = res_cli.fetchone()
+                if row_cli:
+                    st = row["Status do Contrato"].strip().upper()
+                    if st not in ("ATIVO","CANCELADO","GRATUITO","TROCADO","PENDENTE","MANUAL"): st = "PENDENTE"
+                    await db.execute(sqlt("""
+                        INSERT INTO contratos (id,cliente_id,numero_contrato,status,recorrente,modalidade,unidade_venda)
+                        VALUES (:i,:c,:n,:s,:r,:m,:u)
+                        ON CONFLICT (numero_contrato) DO NOTHING
+                    """), {
+                        "i": str(uuid_mod.uuid4()), "c": str(row_cli[0]),
+                        "n": num_ct, "s": st,
+                        "r": _bool(row["Recorrente"]),
+                        "m": _nulo(row["Modalidade de Vendas"]),
+                        "u": _nulo(row.get("Nome Unidade de Venda","")),
+                    })
+                    contratos_criados += 1
+
         await db.commit()
+
         return {
             "sucesso": True,
-            "organizacoes_criadas": resultado.organizacoes_criadas,
-            "usuarios_criados": resultado.usuarios_criados,
-            "vinculos_criados": resultado.vinculos_criados,
-            "clientes_criados": resultado.clientes_criados,
-            "contratos_criados": resultado.contratos_criados,
-            "avisos": resultado.avisos,
-            "erros": resultado.erros,
+            "organizacoes_criadas": org_criada,
+            "usuarios_criados": usuarios_criados,
+            "vinculos_criados": vinculos_criados,
+            "clientes_criados": clientes_criados,
+            "contratos_criados": contratos_criados,
+            "avisos": [],
+            "erros": [],
         }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Erro na importação: {str(e)}")
     finally:
         os.unlink(tmp_path)
 
