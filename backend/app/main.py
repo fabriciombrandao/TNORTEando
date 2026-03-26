@@ -598,11 +598,18 @@ async def analisar_csv(
         esn_nome_map = {r["Código do ESN"].strip(): r["Nome do ESN"].strip() for r in rows if r["Código do ESN"].strip() not in ("-","")}
         esn_map = {}
         cli_esn_map = {}
+        # Primeira passagem: mapear ESN real por cliente
         for r in rows:
             cli = r["Código do Cliente"].strip()
             esn = r["Código do ESN"].strip()
             if esn and esn != "-" and cli not in cli_esn_map:
                 cli_esn_map[cli] = esn
+        # Segunda passagem: clientes sem ESN herdam de outras linhas do mesmo cliente
+        for r in rows:
+            cli = r["Código do Cliente"].strip()
+            esn = r["Código do ESN"].strip()
+            if (not esn or esn == "-") and cli in cli_esn_map:
+                pass  # já tem ESN herdado
 
         # Lista detalhada de clientes únicos
         clientes_vistos = {}
@@ -793,6 +800,14 @@ async def importar_csv(
         clientes_criados = 0
         contratos_criados = 0
 
+        # Pré-processar: mapear ESN real por cliente (para herança)
+        cli_esn_real = {}
+        for r in rows:
+            cli = r["Código do Cliente"].strip()
+            esn = r["Código do ESN"].strip()
+            if esn and esn not in ("-","") and cli not in cli_esn_real:
+                cli_esn_real[cli] = {"cod": esn, "nome": r["Nome do ESN"].strip(), "email": r["E-mail do ESN"].strip(), "ddd": r.get("Código de Área do ESN",""), "tel": r.get("Telefone ESN","")}
+
         for row in rows:
             dsn_id = await get_or_create_usuario(
                 row["Código do DSN"], row["Nome do DSN"], row["E-mail do DSN"], "DSN",
@@ -800,9 +815,16 @@ async def importar_csv(
             gsn_id = await get_or_create_usuario(
                 row["Código do GSN"], row["Nome do GSN"], row["E-mail do GSN"], "GSN",
                 row.get("Código de Área do GSN",""), row.get("Telefone GSN",""))
-            esn_id = await get_or_create_usuario(
-                row["Código do ESN"], row["Nome do ESN"], row["E-mail do ESN"], "ESN",
-                row.get("Código de Área do ESN",""), row.get("Telefone ESN",""))
+            # ESN: herdar de outra linha do mesmo cliente se não tiver
+            cod_cli_atual = row["Código do Cliente"].strip()
+            esn_row = row["Código do ESN"].strip()
+            if not esn_row or esn_row == "-":
+                esn_info = cli_esn_real.get(cod_cli_atual, {})
+                esn_id = await get_or_create_usuario(esn_info.get("cod",""), esn_info.get("nome",""), esn_info.get("email",""), "ESN", esn_info.get("ddd",""), esn_info.get("tel","")) if esn_info else None
+            else:
+                esn_id = await get_or_create_usuario(
+                    row["Código do ESN"], row["Nome do ESN"], row["E-mail do ESN"], "ESN",
+                    row.get("Código de Área do ESN",""), row.get("Telefone ESN",""))
 
             if dsn_id and gsn_id:
                 await get_or_create_vinculo(dsn_id, gsn_id, row["Código do GSN"].strip())
@@ -1255,10 +1277,29 @@ async def importar_csv_selecionado(
         clientes_set = set(); contratos_set = set()
         avisos = []; erros = []
 
+        # Pré-processar: mapear ESN real por cliente (para herança)
+        cli_esn_real = {}
+        for r in rows:
+            cli = r["Código do Cliente"].strip()
+            esn = r["Código do ESN"].strip()
+            esn_n = r["Nome do ESN"].strip()
+            esn_e = r["E-mail do ESN"].strip()
+            esn_ddd = r.get("Código de Área do ESN","")
+            esn_tel = r.get("Telefone ESN","")
+            if esn and esn not in ("-","") and cli not in cli_esn_real:
+                cli_esn_real[cli] = {"cod": esn, "nome": esn_n, "email": esn_e, "ddd": esn_ddd, "tel": esn_tel}
+
         for row in rows:
             dsn_id = await get_or_create_usuario(row["Código do DSN"],row["Nome do DSN"],row["E-mail do DSN"],"DSN",row.get("Código de Área do DSN",""),row.get("Telefone DSN",""))
             gsn_id = await get_or_create_usuario(row["Código do GSN"],row["Nome do GSN"],row["E-mail do GSN"],"GSN",row.get("Código de Área do GSN",""),row.get("Telefone GSN",""))
-            esn_id = await get_or_create_usuario(row["Código do ESN"],row["Nome do ESN"],row["E-mail do ESN"],"ESN",row.get("Código de Área do ESN",""),row.get("Telefone ESN",""))
+            # ESN: usar o da linha ou herdar do cliente
+            cod_cli_atual = row["Código do Cliente"].strip()
+            esn_row = row["Código do ESN"].strip()
+            if not esn_row or esn_row == "-":
+                esn_info = cli_esn_real.get(cod_cli_atual, {})
+                esn_id = await get_or_create_usuario(esn_info.get("cod",""), esn_info.get("nome",""), esn_info.get("email",""), "ESN", esn_info.get("ddd",""), esn_info.get("tel","")) if esn_info else None
+            else:
+                esn_id = await get_or_create_usuario(row["Código do ESN"],row["Nome do ESN"],row["E-mail do ESN"],"ESN",row.get("Código de Área do ESN",""),row.get("Telefone ESN",""))
             if dsn_id and gsn_id: await get_or_create_vinculo(dsn_id,gsn_id,row["Código do GSN"].strip())
             if gsn_id and esn_id: await get_or_create_vinculo(gsn_id,esn_id,row["Código do ESN"].strip())
 
@@ -1311,5 +1352,49 @@ async def importar_csv_selecionado(
         raise HTTPException(status_code=500, detail=f"Erro na importação: {str(e)}")
     finally:
         os.unlink(tmp_path)
+
+
+@router.post("/usuarios", tags=["usuarios"])
+async def criar_usuario(
+    body: dict,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import text as sqlt
+    from app.core.security import get_password_hash
+
+    if current_user.papel not in (PapelUsuario.ADMIN, PapelUsuario.GESTOR_EMPRESA):
+        raise HTTPException(status_code=403, detail="Apenas administradores podem criar usuários.")
+
+    email = body.get("email","").strip().lower()
+    if not email or not body.get("nome","").strip():
+        raise HTTPException(status_code=400, detail="Nome e e-mail são obrigatórios.")
+
+    # Verificar e-mail duplicado
+    res = await db.execute(sqlt("SELECT id FROM usuarios WHERE email=:e"), {"e": email})
+    if res.fetchone():
+        raise HTTPException(status_code=400, detail="E-mail já cadastrado.")
+
+    # Organização do criador
+    org_id = str(current_user.organizacao_id) if current_user.organizacao_id else None
+
+    import uuid as uuid_mod
+    uid = str(uuid_mod.uuid4())
+    await db.execute(sqlt("""
+        INSERT INTO usuarios (id, organizacao_id, codigo_externo, nome, email,
+                              senha_hash, papel, telefone, ativo, primeiro_acesso)
+        VALUES (:i, :o, :c, :n, :e, :h, :p, :t, true, true)
+    """), {
+        "i": uid,
+        "o": org_id,
+        "c": body.get("codigo_externo","").strip() or None,
+        "n": body.get("nome","").strip(),
+        "e": email,
+        "h": get_password_hash(body.get("senha","Mudar@123")),
+        "p": body.get("papel","ESN"),
+        "t": body.get("telefone","").strip() or None,
+    })
+    await db.commit()
+    return {"id": uid, "mensagem": "Usuário criado com sucesso."}
 
 app.include_router(router)

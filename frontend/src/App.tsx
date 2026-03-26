@@ -12,6 +12,7 @@ import ClienteDetalhe from "./pages/ClienteDetalhe";
 import LicenciamentoPage from "./pages/LicenciamentoPage";
 import ContratosPage from "./pages/ContratosPage";
 import ConfiguracoesPage from "./pages/ConfiguracoesPage";
+import UsuariosPage from "./pages/UsuariosPage";
 
 const qc = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
