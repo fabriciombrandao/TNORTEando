@@ -58,13 +58,21 @@ export default function ClientesPage() {
     onError: (e: any) => toast.error(e.response?.data?.detail || "Erro ao atribuir."),
   });
 
-  const clientesFiltrados = (clientes as any[]).filter(c =>
-    !busca ||
-    c.razao_social.toLowerCase().includes(busca.toLowerCase()) ||
-    c.codigo_externo.toLowerCase().includes(busca.toLowerCase()) ||
-    (c.cnpj || "").includes(busca) ||
-    (c.municipio || "").toLowerCase().includes(busca.toLowerCase())
-  );
+  const clientesFiltrados = (clientes as any[]).filter(c => {
+    if (!busca) return true;
+    const b = busca.toLowerCase();
+    const vendedor = (usuarios as any[]).find(u => u.id === c.vendedor_responsavel_id);
+    const nomeEsn = vendedor ? vendedor.nome.toLowerCase() : "";
+    const codEsn  = vendedor ? (vendedor.codigo_externo || "").toLowerCase() : "";
+    return (
+      c.razao_social.toLowerCase().includes(b) ||
+      c.codigo_externo.toLowerCase().includes(b) ||
+      (c.cnpj || "").includes(busca) ||
+      (c.municipio || "").toLowerCase().includes(b) ||
+      nomeEsn.includes(b) ||
+      codEsn.includes(b)
+    );
+  });
 
   const esns = (usuarios as Usuario[]).filter(u => u.papel === "ESN");
   const dormentes = (clientes as any[]).filter(c => c.dormente).length;

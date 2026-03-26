@@ -238,12 +238,33 @@ async def detalhe_cliente(
     current_user: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    cliente = await db.get(Cliente, cliente_id)
-    if not cliente or not cliente.ativo:
+    from sqlalchemy import text as sqlt_c
+    res_cl = await db.execute(sqlt_c("""
+        SELECT id, codigo_externo, razao_social, cnpj, segmento, sub_segmento,
+               municipio, uf, lat, lng, setor_publico, status_atribuicao,
+               status_cliente, classificacao_abc, frequencia_visita_dias,
+               ultima_visita_em, proxima_visita_prevista, observacoes,
+               vendedor_responsavel_id, ativo,
+               COALESCE(dormente, false) as dormente
+        FROM clientes WHERE id = :cid AND ativo = true
+    """), {"cid": str(cliente_id)})
+    cl_row = res_cl.fetchone()
+    if not cl_row:
         raise HTTPException(status_code=404, detail="Cliente não encontrado.")
     if current_user.papel == PapelUsuario.ESN:
-        if str(cliente.vendedor_responsavel_id) != str(current_user.id):
+        if str(cl_row[18]) != str(current_user.id):
             raise HTTPException(status_code=403, detail="Acesso negado.")
+    cliente = type("C", (), {
+        "id": cl_row[0], "codigo_externo": cl_row[1], "razao_social": cl_row[2],
+        "cnpj": cl_row[3], "segmento": cl_row[4], "sub_segmento": cl_row[5],
+        "municipio": cl_row[6], "uf": cl_row[7], "lat": cl_row[8], "lng": cl_row[9],
+        "setor_publico": cl_row[10], "status_atribuicao": cl_row[11],
+        "status_cliente": cl_row[12], "classificacao_abc": cl_row[13],
+        "frequencia_visita_dias": cl_row[14], "ultima_visita_em": cl_row[15],
+        "proxima_visita_prevista": cl_row[16], "observacoes": cl_row[17],
+        "vendedor_responsavel_id": cl_row[18], "ativo": cl_row[19],
+        "dormente": bool(cl_row[20]),
+    })()
 
     # Buscar contratos
     stmt_c = select(Contrato).where(Contrato.cliente_id == cliente_id).order_by(Contrato.criado_em.desc())
@@ -307,6 +328,7 @@ async def detalhe_cliente(
         "observacoes": cliente.observacoes,
         "vendedor_responsavel_id": str(cliente.vendedor_responsavel_id) if cliente.vendedor_responsavel_id else None,
         "ativo": cliente.ativo,
+        "dormente": cliente.dormente,
         "historico_vendas": historico_vendas,
         "contratos": [
             {
