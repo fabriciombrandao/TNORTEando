@@ -512,6 +512,119 @@ async def agenda_hoje(
 # Importação CSV
 # ─────────────────────────────────────────────
 
+
+@router.post("/importacao/analisar", tags=["importacao"])
+async def analisar_csv(
+    file: UploadFile = File(...),
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if current_user.papel not in (PapelUsuario.GESTOR_EMPRESA, PapelUsuario.DSN):
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
+        tmp.write(await file.read())
+        tmp_path = tmp.name
+
+    try:
+        import csv as csv_mod, re
+        from collections import defaultdict
+        from sqlalchemy import text as sqlt
+
+        with open(tmp_path, encoding="ISO-8859-1", newline="") as f:
+            rows = list(csv_mod.DictReader(f, delimiter=";"))
+
+        if not rows:
+            raise HTTPException(status_code=400, detail="Arquivo CSV vazio.")
+
+        cols_req = ["Código do Cliente","Número do Contrato","Codigo Unidade Responsável pelo Atendimento"]
+        for col in cols_req:
+            if col not in rows[0]:
+                raise HTTPException(status_code=400, detail=f"Coluna não encontrada: {col}")
+
+        # Extrair dados do CSV
+        cod_org  = rows[0]["Codigo Unidade Responsável pelo Atendimento"].strip()
+        nom_org  = rows[0]["Nome Unidade de Atendimento"].strip()
+        dsns_csv = {r["Código do DSN"].strip(): r["Nome do DSN"].strip() for r in rows if r["Código do DSN"].strip() not in ("-","")}
+        gsns_csv = {r["Código do GSN"].strip(): r["Nome do GSN"].strip() for r in rows if r["Código do GSN"].strip() not in ("-","")}
+        esns_csv = {r["Código do ESN"].strip(): r["Nome do ESN"].strip() for r in rows if r["Código do ESN"].strip() not in ("-","")}
+        clientes_csv  = set(r["Código do Cliente"].strip() for r in rows if r["Código do Cliente"].strip())
+        contratos_csv = set(r["Número do Contrato"].strip() for r in rows if r["Número do Contrato"].strip())
+
+        # Municípios
+        municipios = defaultdict(int)
+        for r in rows:
+            m = r.get("Município do Cliente","").strip()
+            u = r.get("UF","").strip()
+            if m and m != "-":
+                municipios[f"{m}/{u}"] += 1
+
+        # Clientes sem ESN
+        sem_esn = set()
+        for r in rows:
+            if not r["Código do ESN"].strip() or r["Código do ESN"].strip() == "-":
+                sem_esn.add(r["Código do Cliente"].strip())
+
+        # Comparar com banco
+        res_org = await db.execute(sqlt("SELECT id FROM organizacoes WHERE codigo_externo=:c"), {"c": cod_org})
+        org_existe = res_org.fetchone() is not None
+
+        res_users = await db.execute(sqlt("SELECT codigo_externo FROM usuarios"))
+        usuarios_banco = set(r[0] for r in res_users.fetchall())
+
+        res_cli = await db.execute(sqlt("SELECT codigo_externo FROM clientes"))
+        clientes_banco = set(r[0] for r in res_cli.fetchall())
+
+        res_ct = await db.execute(sqlt("SELECT numero_contrato FROM contratos"))
+        contratos_banco = set(r[0] for r in res_ct.fetchall())
+
+        # Calcular novos vs existentes
+        todos_usuarios_csv = set(dsns_csv) | set(gsns_csv) | set(esns_csv)
+        usuarios_novos     = todos_usuarios_csv - usuarios_banco
+        clientes_novos     = clientes_csv - clientes_banco
+        contratos_novos    = contratos_csv - contratos_banco
+
+        # Alertas
+        alertas = []
+        if sem_esn:
+            alertas.append(f"{len(sem_esn)} cliente(s) sem ESN atribuído")
+        if not org_existe:
+            alertas.append(f"Nova organização será criada: {nom_org}")
+
+        # Top municípios
+        top_municipios = sorted(municipios.items(), key=lambda x: -x[1])[:5]
+
+        return {
+            "valido": True,
+            "arquivo": {
+                "total_linhas": len(rows),
+                "organizacao": {"codigo": cod_org, "nome": nom_org, "existente": org_existe},
+            },
+            "hierarquia": {
+                "dsns": {"total": len(dsns_csv), "novos": len(set(dsns_csv) - usuarios_banco),
+                         "lista": [{"codigo": k, "nome": v, "novo": k not in usuarios_banco} for k,v in dsns_csv.items()]},
+                "gsns": {"total": len(gsns_csv), "novos": len(set(gsns_csv) - usuarios_banco),
+                         "lista": [{"codigo": k, "nome": v, "novo": k not in usuarios_banco} for k,v in gsns_csv.items()]},
+                "esns": {"total": len(esns_csv), "novos": len(set(esns_csv) - usuarios_banco),
+                         "lista": [{"codigo": k, "nome": v, "novo": k not in usuarios_banco} for k,v in esns_csv.items()]},
+            },
+            "clientes": {
+                "total": len(clientes_csv),
+                "novos": len(clientes_novos),
+                "existentes": len(clientes_csv) - len(clientes_novos),
+                "sem_esn": len(sem_esn),
+            },
+            "contratos": {
+                "total": len(contratos_csv),
+                "novos": len(contratos_novos),
+                "existentes": len(contratos_csv) - len(contratos_novos),
+            },
+            "municipios": [{"nome": m, "clientes": n} for m,n in top_municipios],
+            "alertas": alertas,
+        }
+    finally:
+        os.unlink(tmp_path)
+
 @router.post("/importacao/csv", tags=["importacao"])
 async def importar_csv(
     file: UploadFile = File(...),
