@@ -559,11 +559,12 @@ async def analisar_csv(
             if m and m != "-":
                 municipios[f"{m}/{u}"] += 1
 
-        # Clientes sem ESN
-        sem_esn = set()
+        # Clientes sem ESN — só marca se NENHUMA linha do cliente tem ESN
+        clientes_com_esn = set()
         for r in rows:
-            if not r["Código do ESN"].strip() or r["Código do ESN"].strip() == "-":
-                sem_esn.add(r["Código do Cliente"].strip())
+            if r["Código do ESN"].strip() not in ("-", ""):
+                clientes_com_esn.add(r["Código do Cliente"].strip())
+        sem_esn = clientes_csv - clientes_com_esn
 
         # Comparar com banco
         res_org = await db.execute(sqlt("SELECT id FROM organizacoes WHERE codigo_externo=:c"), {"c": cod_org})
@@ -626,7 +627,7 @@ async def analisar_csv(
                 "esn": esn_cod,
                 "esn_nome": esn_nome_map.get(esn_cod, ""),
                 "novo": cod in clientes_novos,
-                "sem_esn": cod in sem_esn,
+                "sem_esn": cod not in clientes_com_esn,
             }
 
         # Lista detalhada de contratos únicos
