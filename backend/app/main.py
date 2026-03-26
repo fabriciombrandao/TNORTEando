@@ -809,6 +809,21 @@ async def importar_csv(
             if esn and esn not in ("-","") and cli not in cli_esn_real:
                 cli_esn_real[cli] = {"cod": esn, "nome": r["Nome do ESN"].strip(), "email": r["E-mail do ESN"].strip(), "ddd": r.get("Código de Área do ESN",""), "tel": r.get("Telefone ESN","")}
 
+        # Pré-processar status dos contratos — ATIVO tem prioridade sobre CANCELADO/TROCADO
+        # Regra: se qualquer linha do contrato for ATIVO, o contrato é ATIVO
+        PRIORIDADE_STATUS = ["ATIVO","GRATUITO","PENDENTE","MANUAL","TROCADO","CANCELADO"]
+        ct_status_final = {}
+        for r in rows:
+            num = r["Número do Contrato"].strip()
+            st  = r["Status do Contrato"].strip().upper()
+            if st not in PRIORIDADE_STATUS: st = "PENDENTE"
+            if num not in ct_status_final:
+                ct_status_final[num] = st
+            else:
+                # Manter o status de maior prioridade (menor índice)
+                if PRIORIDADE_STATUS.index(st) < PRIORIDADE_STATUS.index(ct_status_final[num]):
+                    ct_status_final[num] = st
+
         for row in rows:
             dsn_id = await get_or_create_usuario(
                 row["Código do DSN"], row["Nome do DSN"], row["E-mail do DSN"], "DSN",
@@ -1290,6 +1305,21 @@ async def importar_csv_selecionado(
             if esn and esn not in ("-","") and cli not in cli_esn_real:
                 cli_esn_real[cli] = {"cod": esn, "nome": esn_n, "email": esn_e, "ddd": esn_ddd, "tel": esn_tel}
 
+        # Pré-processar status dos contratos — ATIVO tem prioridade sobre CANCELADO/TROCADO
+        # Regra: se qualquer linha do contrato for ATIVO, o contrato é ATIVO
+        PRIORIDADE_STATUS = ["ATIVO","GRATUITO","PENDENTE","MANUAL","TROCADO","CANCELADO"]
+        ct_status_final = {}
+        for r in rows:
+            num = r["Número do Contrato"].strip()
+            st  = r["Status do Contrato"].strip().upper()
+            if st not in PRIORIDADE_STATUS: st = "PENDENTE"
+            if num not in ct_status_final:
+                ct_status_final[num] = st
+            else:
+                # Manter o status de maior prioridade (menor índice)
+                if PRIORIDADE_STATUS.index(st) < PRIORIDADE_STATUS.index(ct_status_final[num]):
+                    ct_status_final[num] = st
+
         for row in rows:
             dsn_id = await get_or_create_usuario(row["Código do DSN"],row["Nome do DSN"],row["E-mail do DSN"],"DSN",row.get("Código de Área do DSN",""),row.get("Telefone DSN",""))
             gsn_id = await get_or_create_usuario(row["Código do GSN"],row["Nome do GSN"],row["E-mail do GSN"],"GSN",row.get("Código de Área do GSN",""),row.get("Telefone GSN",""))
@@ -1336,11 +1366,10 @@ async def importar_csv_selecionado(
                 res_cli = await db.execute(sqlt("SELECT id FROM clientes WHERE codigo_externo=:c"), {"c":cod_cli})
                 row_cli = res_cli.fetchone()
                 if row_cli:
-                    st=row["Status do Contrato"].strip().upper()
-                    if st not in ("ATIVO","CANCELADO","GRATUITO","TROCADO","PENDENTE","MANUAL"): st="PENDENTE"
+                    st = ct_status_final.get(num_ct, "PENDENTE")
                     await db.execute(sqlt("""
                         INSERT INTO contratos (id,cliente_id,numero_contrato,status,recorrente,modalidade,unidade_venda)
-                        VALUES (:i,:c,:n,:s,:r,:m,:u) ON CONFLICT (numero_contrato) DO NOTHING
+                        VALUES (:i,:c,:n,:s,:r,:m,:u) ON CONFLICT (numero_contrato) DO UPDATE SET status=EXCLUDED.status
                     """), {"i":str(uuid_mod.uuid4()),"c":str(row_cli[0]),"n":num_ct,"s":st,"r":_bool(row["Recorrente"]),"m":_nulo(row["Modalidade de Vendas"]),"u":_nulo(row.get("Nome Unidade de Venda",""))})
                     contratos_criados+=1
 
