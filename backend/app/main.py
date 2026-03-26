@@ -156,51 +156,63 @@ async def listar_clientes(
     current_user: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(Cliente)
+    from sqlalchemy import text as sqlt
+
+    # Filtros
+    where = ["c.ativo = true"] if apenas_ativos else []
+    params = {}
+
     if current_user.papel == PapelUsuario.ESN:
-        stmt = stmt.where(Cliente.vendedor_responsavel_id == current_user.id)
-    if apenas_ativos:
-        stmt = stmt.where(Cliente.ativo == True)
+        where.append("c.vendedor_responsavel_id = :esn_id")
+        params["esn_id"] = str(current_user.id)
     if filtro == "pendentes":
-        from app.models.models import StatusAtribuicao
-        stmt = stmt.where(Cliente.status_atribuicao == StatusAtribuicao.PENDENTE)
+        where.append("c.status_atribuicao = 'PENDENTE'")
     elif filtro == "atribuidos":
-        from app.models.models import StatusAtribuicao
-        stmt = stmt.where(Cliente.status_atribuicao == StatusAtribuicao.ATRIBUIDO)
+        where.append("c.status_atribuicao = 'ATRIBUIDO'")
     if busca:
-        like = f"%{busca}%"
-        stmt = stmt.where(
-            Cliente.razao_social.ilike(like) |
-            Cliente.codigo_externo.ilike(like) |
-            Cliente.municipio.ilike(like) |
-            Cliente.cnpj.ilike(like)
-        )
+        where.append("(c.razao_social ILIKE :busca OR c.codigo_externo ILIKE :busca OR c.municipio ILIKE :busca OR c.cnpj ILIKE :busca)")
+        params["busca"] = f"%{busca}%"
     if uf:
-        stmt = stmt.where(Cliente.uf == uf.upper())
-    stmt = stmt.order_by(Cliente.razao_social)
-    result = await db.execute(stmt)
-    clientes = result.scalars().all()
+        where.append("c.uf = :uf")
+        params["uf"] = uf.upper()
+
+    where_sql = "WHERE " + " AND ".join(where) if where else ""
+
+    result = await db.execute(sqlt(f"""
+        SELECT
+            c.id, c.codigo_externo, c.razao_social, c.cnpj,
+            c.segmento, c.sub_segmento, c.municipio, c.uf,
+            c.lat, c.lng, c.setor_publico,
+            c.status_atribuicao, c.status_cliente, c.classificacao_abc,
+            c.vendedor_responsavel_id, c.ativo,
+            COALESCE(c.dormente, false) as dormente
+        FROM clientes c
+        {where_sql}
+        ORDER BY c.razao_social
+    """), params)
+
+    rows = result.fetchall()
     return [
         {
-            "id": str(c.id),
-            "codigo_externo": c.codigo_externo,
-            "razao_social": c.razao_social,
-            "cnpj": c.cnpj,
-            "segmento": c.segmento,
-            "sub_segmento": c.sub_segmento,
-            "municipio": c.municipio,
-            "uf": c.uf,
-            "lat": c.lat,
-            "lng": c.lng,
-            "setor_publico": c.setor_publico,
-            "status_atribuicao": c.status_atribuicao,
-            "status_cliente": c.status_cliente,
-            "classificacao_abc": c.classificacao_abc,
-            "vendedor_responsavel_id": str(c.vendedor_responsavel_id) if c.vendedor_responsavel_id else None,
-            "ativo": c.ativo,
-            "dormente": getattr(c, "dormente", False) or False,
+            "id": str(r[0]),
+            "codigo_externo": r[1],
+            "razao_social": r[2],
+            "cnpj": r[3],
+            "segmento": r[4],
+            "sub_segmento": r[5],
+            "municipio": r[6],
+            "uf": r[7],
+            "lat": r[8],
+            "lng": r[9],
+            "setor_publico": r[10],
+            "status_atribuicao": r[11],
+            "status_cliente": r[12],
+            "classificacao_abc": r[13],
+            "vendedor_responsavel_id": str(r[14]) if r[14] else None,
+            "ativo": r[15],
+            "dormente": bool(r[16]),
         }
-        for c in clientes
+        for r in rows
     ]
 
 @router.get("/clientes/estatisticas", tags=["clientes"])
@@ -743,10 +755,11 @@ async def salvar_parametros(
         "c": body.get("mrr_cliente_c", 100),
     })
 
-    await db.execute(sqlt("""
+    meses = int(body.get("meses_dormente", 18))
+    await db.execute(sqlt(f"""
         UPDATE clientes c SET dormente =
           CASE
-            WHEN ult.ultima_compra < CURRENT_DATE - (:md || ' months')::interval THEN true
+            WHEN ult.ultima_compra < CURRENT_DATE - INTERVAL '{meses} months' THEN true
             ELSE false
           END
         FROM (
@@ -757,7 +770,7 @@ async def salvar_parametros(
             GROUP BY ct2.cliente_id
         ) ult
         WHERE c.id = ult.cliente_id
-    """), {"md": body.get("meses_dormente", 18)})
+    """))
 
     await db.commit()
     return {"ok": True, "mensagem": "Parâmetros salvos e clientes reclassificados."}
