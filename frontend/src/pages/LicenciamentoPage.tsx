@@ -99,7 +99,7 @@ export default function LicenciamentoPage() {
         </button>
       </div>
 
-      <div className="p-4 space-y-3 max-w-lg mx-auto">
+      <div className="p-4 space-y-3 max-w-lg mx-auto overflow-x-hidden">
 
         {/* KPI único — MRR */}
         <div className="bg-white rounded-xl border border-slate-100 p-4" style={{borderTop: "2px solid #34c77b"}}>
@@ -122,7 +122,7 @@ export default function LicenciamentoPage() {
             </div>
 
             {/* Cabeçalho */}
-            <div className="grid grid-cols-[1fr_40px_70px_70px] gap-2 px-4 py-2 border-b border-slate-50">
+            <div className="grid grid-cols-[1fr_36px_64px_72px] gap-1 px-3 py-2 border-b border-slate-50">
               <span className="text-xs text-slate-400 font-medium">Produto</span>
               <span className="text-xs text-slate-400 font-medium text-center">Qtd</span>
               <span className="text-xs text-slate-400 font-medium text-right">Unit.</span>
@@ -131,13 +131,13 @@ export default function LicenciamentoPage() {
 
             <div className="divide-y divide-slate-50">
               {(data.recorrentes as any[]).map((p: any, i: number) => (
-                <div key={i} className="grid grid-cols-[1fr_40px_70px_70px] gap-2 px-4 py-2.5 items-center">
-                  <p className="text-sm font-medium text-slate-800 leading-tight">{p.descricao}</p>
-                  <p className="text-sm text-slate-500 text-center">{formatQtd(p.quantidade)}</p>
-                  <p className="text-xs text-slate-400 text-right">
+                <div key={i} className="grid grid-cols-[1fr_36px_64px_72px] gap-1 px-3 py-2 items-start">
+                  <p className="text-xs font-medium text-slate-800 leading-tight break-words">{p.descricao}</p>
+                  <p className="text-xs text-slate-500 text-center pt-0.5">{formatQtd(p.quantidade)}</p>
+                  <p className="text-xs text-slate-400 text-right pt-0.5">
                     {p.quantidade > 0 ? formatBRL(p.valor_total / p.quantidade) : "—"}
                   </p>
-                  <p className="text-sm font-semibold text-emerald-600 text-right">{formatBRL(p.valor_total)}</p>
+                  <p className="text-xs font-semibold text-emerald-600 text-right pt-0.5">{formatBRL(p.valor_total)}</p>
                 </div>
               ))}
             </div>
@@ -155,7 +155,7 @@ export default function LicenciamentoPage() {
               <span className="text-sm font-bold text-slate-500">{formatBRL(data.total_nao_recorrente)}</span>
             </div>
 
-            <div className="grid grid-cols-[1fr_40px_70px_70px] gap-2 px-4 py-2 border-b border-slate-50">
+            <div className="grid grid-cols-[1fr_36px_64px_72px] gap-1 px-3 py-2 border-b border-slate-50">
               <span className="text-xs text-slate-400 font-medium">Produto</span>
               <span className="text-xs text-slate-400 font-medium text-center">Qtd</span>
               <span className="text-xs text-slate-400 font-medium text-right">Unit.</span>
@@ -164,13 +164,13 @@ export default function LicenciamentoPage() {
 
             <div className="divide-y divide-slate-50">
               {(data.nao_recorrentes as any[]).map((p: any, i: number) => (
-                <div key={i} className="grid grid-cols-[1fr_40px_70px_70px] gap-2 px-4 py-2.5 items-center">
-                  <p className="text-sm font-medium text-slate-800 leading-tight">{p.descricao}</p>
-                  <p className="text-sm text-slate-500 text-center">{formatQtd(p.quantidade)}</p>
-                  <p className="text-xs text-slate-400 text-right">
+                <div key={i} className="grid grid-cols-[1fr_36px_64px_72px] gap-1 px-3 py-2 items-start">
+                  <p className="text-xs font-medium text-slate-800 leading-tight break-words">{p.descricao}</p>
+                  <p className="text-xs text-slate-500 text-center pt-0.5">{formatQtd(p.quantidade)}</p>
+                  <p className="text-xs text-slate-400 text-right pt-0.5">
                     {p.quantidade > 0 ? formatBRL(p.valor_total / p.quantidade) : "—"}
                   </p>
-                  <p className="text-sm text-slate-500 text-right">{formatBRL(p.valor_total)}</p>
+                  <p className="text-xs text-slate-500 text-right pt-0.5">{formatBRL(p.valor_total)}</p>
                 </div>
               ))}
             </div>

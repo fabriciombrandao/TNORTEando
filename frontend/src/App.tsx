@@ -11,6 +11,7 @@ import ClientesPage from "./pages/ClientesPage";
 import ClienteDetalhe from "./pages/ClienteDetalhe";
 import LicenciamentoPage from "./pages/LicenciamentoPage";
 import ContratosPage from "./pages/ContratosPage";
+import ConfiguracoesPage from "./pages/ConfiguracoesPage";
 
 const qc = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -88,16 +89,7 @@ function MapaPlaceholder() {
   );
 }
 
-function ConfiguracoesPlaceholder() {
-  return (
-    <div className="p-6">
-      <h1 className="text-xl font-bold text-slate-900 mb-2">Configurações</h1>
-      <div className="card p-10 text-center">
-        <p className="text-slate-400 text-sm">Parâmetros e regras de visita em desenvolvimento.</p>
-      </div>
-    </div>
-  );
-}
+
 
 export default function App() {
   return (
@@ -122,7 +114,7 @@ export default function App() {
             <Route path="clientes/:id/licenciamento" element={<LicenciamentoPage />} />
             <Route path="clientes/:id/contratos" element={<ContratosPage />} />
             <Route path="importacao"    element={<ImportacaoPage />} />
-            <Route path="configuracoes" element={<ConfiguracoesPlaceholder />} />
+            <Route path="configuracoes" element={<ConfiguracoesPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

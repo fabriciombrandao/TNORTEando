@@ -83,6 +83,9 @@ export default function ClienteDetalhe() {
             <h1 className="text-lg font-bold text-slate-900">{cliente.razao_social}</h1>
             {cliente.classificacao_abc && <BadgeABC cls={cliente.classificacao_abc} />}
             <span className="badge-green text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-medium">Ativo</span>
+            {cliente.dormente && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-600 font-semibold">Dormente</span>
+            )}
           </div>
           <p className="text-xs text-slate-400 font-mono mt-0.5">
             {cliente.codigo_externo} · {formatCNPJ(cliente.cnpj)} · {cliente.segmento} · {cliente.municipio}/{cliente.uf}

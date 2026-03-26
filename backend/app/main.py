@@ -198,6 +198,7 @@ async def listar_clientes(
             "classificacao_abc": c.classificacao_abc,
             "vendedor_responsavel_id": str(c.vendedor_responsavel_id) if c.vendedor_responsavel_id else None,
             "ativo": c.ativo,
+            "dormente": getattr(c, "dormente", False) or False,
         }
         for c in clientes
     ]
@@ -645,5 +646,120 @@ async def licenciamento_cliente(
         "recorrentes": recorrentes,
         "nao_recorrentes": nao_recorrentes,
     }
+
+
+# ─────────────────────────────────────────────
+# Parâmetros da Organização
+# ─────────────────────────────────────────────
+
+@router.get("/parametros", tags=["parametros"])
+async def get_parametros(
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import text as sqlt
+    res = await db.execute(sqlt("""
+        SELECT
+            COALESCE(mrr_cliente_a, 5000)       as mrr_cliente_a,
+            COALESCE(mrr_cliente_b, 1000)       as mrr_cliente_b,
+            COALESCE(mrr_cliente_c, 100)        as mrr_cliente_c,
+            COALESCE(meses_dormente, 18)        as meses_dormente,
+            COALESCE(visitas_por_dia_max, 8)    as visitas_por_dia_max,
+            COALESCE(raio_checkin_metros, 300)  as raio_checkin_metros,
+            COALESCE(frequencia_padrao_dias, 30) as frequencia_padrao_dias
+        FROM parametros_organizacao
+        JOIN organizacoes o ON o.id = organizacao_id
+        LIMIT 1
+    """))
+    row = res.fetchone()
+    if not row:
+        return {
+            "mrr_cliente_a": 5000.0, "mrr_cliente_b": 1000.0,
+            "mrr_cliente_c": 100.0, "meses_dormente": 18,
+            "visitas_por_dia_max": 8, "raio_checkin_metros": 300,
+            "frequencia_padrao_dias": 30,
+        }
+    return {
+        "mrr_cliente_a": float(row[0]),
+        "mrr_cliente_b": float(row[1]),
+        "mrr_cliente_c": float(row[2]),
+        "meses_dormente": int(row[3]),
+        "visitas_por_dia_max": int(row[4]),
+        "raio_checkin_metros": int(row[5]),
+        "frequencia_padrao_dias": int(row[6]),
+    }
+
+@router.put("/parametros", tags=["parametros"])
+async def salvar_parametros(
+    body: dict,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if current_user.papel != PapelUsuario.GESTOR_EMPRESA:
+        raise HTTPException(status_code=403, detail="Apenas o gestor pode alterar parâmetros.")
+
+    from sqlalchemy import text as sqlt
+
+    # Atualizar parâmetros
+    await db.execute(sqlt("""
+        UPDATE parametros_organizacao SET
+            mrr_cliente_a       = :a,
+            mrr_cliente_b       = :b,
+            mrr_cliente_c       = :c,
+            meses_dormente      = :md,
+            visitas_por_dia_max = :vd,
+            raio_checkin_metros = :rc,
+            frequencia_padrao_dias = :fp,
+            atualizado_em       = now()
+        WHERE organizacao_id = (SELECT id FROM organizacoes LIMIT 1)
+    """), {
+        "a":  body.get("mrr_cliente_a", 5000),
+        "b":  body.get("mrr_cliente_b", 1000),
+        "c":  body.get("mrr_cliente_c", 100),
+        "md": body.get("meses_dormente", 18),
+        "vd": body.get("visitas_por_dia_max", 8),
+        "rc": body.get("raio_checkin_metros", 300),
+        "fp": body.get("frequencia_padrao_dias", 30),
+    })
+
+    # Recalcular classificação ABC e dormentes
+    await db.execute(sqlt("""
+        UPDATE clientes c SET classificacao_abc =
+          CASE
+            WHEN COALESCE(ct.mrr, 0) >= :a THEN 'A'
+            WHEN COALESCE(ct.mrr, 0) >= :b THEN 'B'
+            WHEN COALESCE(ct.mrr, 0) >= :c THEN 'C'
+            ELSE 'C'
+          END
+        FROM (
+            SELECT ct2.cliente_id, COALESCE(SUM(ct2.valor_mensal), 0) as mrr
+            FROM contratos ct2 WHERE ct2.status = 'ATIVO'
+            GROUP BY ct2.cliente_id
+        ) ct
+        WHERE c.id = ct.cliente_id
+    """), {
+        "a": body.get("mrr_cliente_a", 5000),
+        "b": body.get("mrr_cliente_b", 1000),
+        "c": body.get("mrr_cliente_c", 100),
+    })
+
+    await db.execute(sqlt("""
+        UPDATE clientes c SET dormente =
+          CASE
+            WHEN ult.ultima_compra < CURRENT_DATE - (:md || ' months')::interval THEN true
+            ELSE false
+          END
+        FROM (
+            SELECT ct2.cliente_id, MAX(p.data_assinatura) as ultima_compra
+            FROM propostas_contrato p
+            JOIN contratos ct2 ON ct2.id = p.contrato_id
+            WHERE p.data_assinatura IS NOT NULL
+            GROUP BY ct2.cliente_id
+        ) ult
+        WHERE c.id = ult.cliente_id
+    """), {"md": body.get("meses_dormente", 18)})
+
+    await db.commit()
+    return {"ok": True, "mensagem": "Parâmetros salvos e clientes reclassificados."}
 
 app.include_router(router)

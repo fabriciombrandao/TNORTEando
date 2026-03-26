@@ -161,6 +161,9 @@ export default function ClientesPage() {
                     )}
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
+                    {(c as any).dormente && (
+                      <span className="text-xs font-semibold text-red-500 bg-red-50 px-1.5 py-0.5 rounded">Dormente</span>
+                    )}
                     {c.status_atribuicao === "ATRIBUIDO"
                       ? <CheckCircle className="w-4 h-4 text-emerald-500" />
                       : <AlertTriangle className="w-4 h-4 text-amber-400" />
@@ -212,10 +215,15 @@ export default function ClientesPage() {
                         }
                       </td>
                       <td className="px-4 py-3">
-                        {c.status_atribuicao === "ATRIBUIDO"
-                          ? <span className="inline-flex items-center gap-1 text-xs font-medium bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-full"><CheckCircle className="w-3 h-3" /> Atribuído</span>
-                          : <span className="inline-flex items-center gap-1 text-xs font-medium bg-amber-50 text-amber-700 px-2.5 py-1 rounded-full"><AlertTriangle className="w-3 h-3" /> Pendente</span>
-                        }
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {c.status_atribuicao === "ATRIBUIDO"
+                            ? <span className="inline-flex items-center gap-1 text-xs font-medium bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-full"><CheckCircle className="w-3 h-3" /> Atribuído</span>
+                            : <span className="inline-flex items-center gap-1 text-xs font-medium bg-amber-50 text-amber-700 px-2.5 py-1 rounded-full"><AlertTriangle className="w-3 h-3" /> Pendente</span>
+                          }
+                          {(c as any).dormente && (
+                            <span className="inline-flex text-xs font-semibold bg-red-50 text-red-600 px-2 py-0.5 rounded-full">Dormente</span>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
