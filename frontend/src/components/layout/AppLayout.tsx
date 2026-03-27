@@ -12,7 +12,7 @@ import { useState } from "react";
 const NAV_ITEMS = [
   {
     to: "/", label: "Dashboard", icon: LayoutDashboard,
-    papeis: ["GESTOR_EMPRESA", "DSN", "GSN"],
+    papeis: ["ADMIN", "GESTOR_CONSOLIDADORA", "GESTOR_EMPRESA", "DSN", "GSN"],
     mobileNav: false,
   },
   {
@@ -27,27 +27,29 @@ const NAV_ITEMS = [
   },
   {
     to: "/mapa", label: "Mapa ao Vivo", icon: MapPin,
-    papeis: ["GESTOR_EMPRESA", "DSN", "GSN"],
+    papeis: ["ADMIN", "GESTOR_CONSOLIDADORA", "GESTOR_EMPRESA", "DSN", "GSN"],
     mobileNav: false,
   },
   {
     to: "/clientes", label: "Clientes", icon: Users,
-    papeis: ["GESTOR_EMPRESA", "DSN", "GSN", "ESN"],
+    papeis: ["ADMIN", "GESTOR_CONSOLIDADORA", "GESTOR_EMPRESA", "DSN", "GSN", "ESN"],
     mobileNav: true,
   },
   {
     to: "/importacao", label: "Importação", icon: UploadCloud,
-    papeis: ["GESTOR_EMPRESA", "DSN"],
+    papeis: ["ADMIN", "GESTOR_CONSOLIDADORA", "GESTOR_EMPRESA", "DSN"],
     mobileNav: false,
   },
   {
     to: "/configuracoes", label: "Configurações", icon: Settings,
-    papeis: ["GESTOR_EMPRESA"],
+    papeis: ["ADMIN", "GESTOR_CONSOLIDADORA", "GESTOR_EMPRESA"],
     mobileNav: false,
   },
 ];
 
 const PAPEL_LABEL: Record<string, string> = {
+  ADMIN: "Administrador",
+  GESTOR_CONSOLIDADORA: "Gestor Consolidadora",
   GESTOR_EMPRESA: "Gestor",
   DSN: "Diretor",
   GSN: "Gerente",
