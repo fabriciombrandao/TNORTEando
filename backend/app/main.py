@@ -1233,6 +1233,19 @@ async def importar_csv_selecionado(
             if not t: return None
             return f"({d}) {t}" if d else t
 
+        def _val(v):
+            import re as _re
+            if not v or v.strip() in ("","-"): return 0.0
+            try: return float(_re.sub(r"[^0-9,]","",v.strip()).replace(",",".") or 0)
+            except: return 0.0
+        def _data(s):
+            if not s or s.strip() in ("-",""): return None
+            try:
+                parts = s.strip().split("/")
+                if len(parts)==3: return dt_date(int(parts[2]),int(parts[1]),int(parts[0]))
+            except: pass
+            return None
+
         with open(tmp_path, encoding="ISO-8859-1", newline="") as f:
             rows = list(csv_mod.DictReader(f, delimiter=";"))
 
