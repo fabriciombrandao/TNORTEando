@@ -124,10 +124,16 @@ function ContratoCard({ contrato }: { contrato: any }) {
                     </p>
                     <div className="space-y-1">
                       {(proposta.itens || []).filter((i: any) => i.recorrente).map((item: any) => (
-                        <div key={item.id} className="grid grid-cols-[1fr_36px_70px] gap-2 text-xs items-center">
-                          <p className="text-slate-700 font-medium truncate">{item.descricao_produto}</p>
+                        <div key={item.id} className={`grid grid-cols-[1fr_36px_70px] gap-2 text-xs items-center ${item.cancelado ? "opacity-40" : item.gratuito ? "opacity-60" : ""}`}>
+                          <p className={`font-medium truncate ${item.cancelado ? "line-through text-slate-400" : "text-slate-700"}`}>
+                            {item.descricao_produto}
+                            {item.cancelado && <span className="ml-1 text-red-400">(cancelado)</span>}
+                            {item.gratuito && !item.cancelado && <span className="ml-1 text-emerald-500">(gratuito)</span>}
+                          </p>
                           <p className="text-slate-400 text-center">{item.quantidade}</p>
-                          <p className="text-emerald-600 font-semibold text-right">{formatBRL(item.valor_total)}</p>
+                          <p className={`font-semibold text-right ${item.cancelado ? "text-slate-300" : item.gratuito ? "text-emerald-400" : "text-emerald-600"}`}>
+                            {item.gratuito ? "Gratuito" : formatBRL(item.valor_total)}
+                          </p>
                         </div>
                       ))}
                     </div>
@@ -142,10 +148,16 @@ function ContratoCard({ contrato }: { contrato: any }) {
                     </p>
                     <div className="space-y-1">
                       {(proposta.itens || []).filter((i: any) => !i.recorrente).map((item: any) => (
-                        <div key={item.id} className="grid grid-cols-[1fr_36px_70px] gap-2 text-xs items-center">
-                          <p className="text-slate-700 font-medium truncate">{item.descricao_produto}</p>
+                        <div key={item.id} className={`grid grid-cols-[1fr_36px_70px] gap-2 text-xs items-center ${item.cancelado ? "opacity-40" : ""}`}>
+                          <p className={`font-medium truncate ${item.cancelado ? "line-through text-slate-400" : "text-slate-700"}`}>
+                            {item.descricao_produto}
+                            {item.cancelado && <span className="ml-1 text-red-400">(cancelado)</span>}
+                            {item.gratuito && !item.cancelado && <span className="ml-1 text-emerald-500">(gratuito)</span>}
+                          </p>
                           <p className="text-slate-400 text-center">{item.quantidade}</p>
-                          <p className="text-slate-500 text-right">{formatBRL(item.valor_total)}</p>
+                          <p className={`text-right ${item.cancelado ? "text-slate-300" : item.gratuito ? "text-emerald-400" : "text-slate-500"}`}>
+                            {item.gratuito ? "Gratuito" : formatBRL(item.valor_total)}
+                          </p>
                         </div>
                       ))}
                     </div>

@@ -943,7 +943,10 @@ async def propostas_contrato(
         res_i = await db.execute(text("""
             SELECT id, codigo_produto, descricao_produto, agrupador,
                    quantidade, valor_unitario, valor_total, recorrente,
-                   modalidade, data_vencimento
+                   modalidade, data_vencimento,
+                   COALESCE(status_cancelamento, '') as status_cancelamento,
+                   data_assinatura_item,
+                   COALESCE(status_item, 'ATIVO') as status_item
             FROM itens_contrato
             WHERE proposta_id = :pid
             ORDER BY recorrente DESC, valor_total DESC
@@ -1291,6 +1294,7 @@ async def importar_csv_selecionado(
             vinculos_criados+=1
 
         clientes_set = set(); contratos_set = set()
+        propostas_set = set(); propostas_ids = {}
         avisos = []; erros = []
 
         # Pré-processar: mapear ESN real por cliente (para herança)
@@ -1367,11 +1371,47 @@ async def importar_csv_selecionado(
                 row_cli = res_cli.fetchone()
                 if row_cli:
                     st = ct_status_final.get(num_ct, "PENDENTE")
+                    ct_id = str(uuid_mod.uuid4())
                     await db.execute(sqlt("""
                         INSERT INTO contratos (id,cliente_id,numero_contrato,status,recorrente,modalidade,unidade_venda)
                         VALUES (:i,:c,:n,:s,:r,:m,:u) ON CONFLICT (numero_contrato) DO UPDATE SET status=EXCLUDED.status
-                    """), {"i":str(uuid_mod.uuid4()),"c":str(row_cli[0]),"n":num_ct,"s":st,"r":_bool(row["Recorrente"]),"m":_nulo(row["Modalidade de Vendas"]),"u":_nulo(row.get("Nome Unidade de Venda",""))})
+                        RETURNING id
+                    """), {"i":ct_id,"c":str(row_cli[0]),"n":num_ct,"s":st,"r":_bool(row["Recorrente"]),"m":_nulo(row["Modalidade de Vendas"]),"u":_nulo(row.get("Nome Unidade de Venda",""))})
+                    res_ct_id = await db.execute(sqlt("SELECT id FROM contratos WHERE numero_contrato=:n"), {"n":num_ct})
+                    ct_id_real = str(res_ct_id.fetchone()[0])
                     contratos_criados+=1
+                    # Registrar proposta + itens
+                    num_prop = _nulo(row.get("Número da Proposta","")) or num_ct
+                    plan_fin = _nulo(row.get("Planilha Financeira no Contrato",""))
+                    data_ass_cont = _data(row.get("Data de Assinatura",""))
+                    prop_key = (ct_id_real, num_prop)
+                    if prop_key not in propostas_set:
+                        propostas_set.add(prop_key)
+                        prop_id = str(uuid_mod.uuid4())
+                        await db.execute(sqlt("""
+                            INSERT INTO propostas_contrato (id,contrato_id,numero_proposta,planilha_financeira,data_assinatura,modalidade,valor_total,valor_recorrente)
+                            VALUES (:i,:c,:n,:p,:d,:m,0,0)
+                            ON CONFLICT (contrato_id, numero_proposta) DO NOTHING
+                        """), {"i":prop_id,"c":ct_id_real,"n":num_prop,"p":plan_fin,"d":data_ass_cont,"m":_nulo(row.get("Modalidade de Vendas",""))})
+                        res_prop = await db.execute(sqlt("SELECT id FROM propostas_contrato WHERE contrato_id=:c AND numero_proposta=:n"), {"c":ct_id_real,"n":num_prop})
+                        prop_id_real = str(res_prop.fetchone()[0])
+                        propostas_ids[(ct_id_real, num_prop)] = prop_id_real
+                    prop_id_real = propostas_ids.get((ct_id_real, num_prop), prop_id if "prop_id" in dir() else None)
+                    if prop_id_real:
+                        st_cancel = _nulo(row.get("Status Cancelamento",""))
+                        data_item = _data(row.get("Data de Assinatura do Item","")) or data_ass_cont
+                        val_unit  = _val(row.get("Valor Unitário",""))
+                        val_tot   = _val(row.get("Valor Total do Contrato",""))
+                        qtd       = int(float(row.get("Quantidade do Item","1").replace(",",".") or 1))
+                        cod_prod  = _nulo(row.get("Código do Produto",""))
+                        desc_prod = _nulo(row.get("Descrição do Produto",""))
+                        rec_item  = _bool(row.get("Recorrente","NAO"))
+                        st_item = row.get("Status do Contrato","").strip().upper()
+                        await db.execute(sqlt("""
+                            INSERT INTO itens_contrato (id,proposta_id,contrato_id,codigo_produto,descricao_produto,quantidade,valor_unitario,valor_total,recorrente,status_cancelamento,status_item,data_assinatura_item)
+                            VALUES (:i,:p,:c,:cp,:dp,:q,:vu,:vt,:r,:sc,:si,:di)
+                            ON CONFLICT DO NOTHING
+                        """), {"i":str(uuid_mod.uuid4()),"p":prop_id_real,"c":ct_id_real,"cp":cod_prod,"dp":desc_prod,"q":qtd,"vu":val_unit,"vt":val_tot,"r":rec_item,"sc":st_cancel,"si":st_item,"di":data_item})
 
         await db.commit()
         return {"sucesso":True,"organizacoes_criadas":org_criada,"usuarios_criados":usuarios_criados,"vinculos_criados":vinculos_criados,"clientes_criados":clientes_criados,"contratos_criados":contratos_criados,"avisos":avisos,"erros":erros}
