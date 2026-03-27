@@ -86,6 +86,11 @@ export default function ClienteDetalhe() {
             {cliente.dormente && (
               <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-600 font-semibold border border-red-100">Dormente</span>
             )}
+            {cliente.em_cancelamento_total && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-600 font-semibold border border-red-100">
+                Cancelamento{cliente.fim_cancelamento ? ` ${cliente.fim_cancelamento}` : ""}
+              </span>
+            )}
           </div>
           <p className="text-xs text-slate-400 font-mono mt-0.5">
             {cliente.codigo_externo} · {formatCNPJ(cliente.cnpj)} · {cliente.segmento} · {cliente.municipio}/{cliente.uf}
@@ -131,6 +136,11 @@ export default function ClienteDetalhe() {
           <p className="text-xs text-slate-400">{totalPropostas} proposta{totalPropostas !== 1 ? "s" : ""}</p>
           {emCancelamento > 0 && (
             <p className="text-xs text-red-500 mt-0.5 font-medium">{emCancelamento} em aviso prévio</p>
+          )}
+          {cliente.em_cancelamento_total && (
+            <p className="text-xs text-red-600 font-semibold mt-0.5">
+              Em cancelamento total{cliente.fim_cancelamento ? ` — vence ${cliente.fim_cancelamento}` : ""}
+            </p>
           )}
           <p className="text-xs text-indigo-400 mt-2 group-hover:text-indigo-600">Ver detalhes →</p>
         </button>

@@ -138,6 +138,11 @@ export default function ClientesPage() {
                         <span className="text-xs font-mono text-slate-400">{formatCNPJ(c.cnpj)}</span>
                       )}
                       {c.dormente && <BadgeDormente />}
+                      {(c as any).em_cancelamento_total && (
+                        <span className="inline-flex text-xs font-semibold bg-red-50 text-red-600 px-2 py-0.5 rounded-full border border-red-100">
+                          Cancelamento{(c as any).fim_cancelamento ? ` ${(c as any).fim_cancelamento}` : ""}
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-3 mt-1.5 flex-wrap">
                       {c.segmento && (
@@ -194,11 +199,16 @@ export default function ClientesPage() {
                             </span>
                           )}
                         </div>
-                        <div className="flex items-center gap-2 mt-0.5">
+                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                           {c.cnpj && (
                             <span className="text-xs font-mono text-slate-400">{formatCNPJ(c.cnpj)}</span>
                           )}
                           {c.dormente && <BadgeDormente />}
+                          {(c as any).em_cancelamento_total && (
+                            <span className="inline-flex text-xs font-semibold bg-red-50 text-red-600 px-2 py-0.5 rounded-full border border-red-100">
+                              Cancelamento{(c as any).fim_cancelamento ? ` ${(c as any).fim_cancelamento}` : ""}
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="px-4 py-3 text-slate-500">

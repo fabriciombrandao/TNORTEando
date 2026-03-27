@@ -185,7 +185,35 @@ async def listar_clientes(
             c.lat, c.lng, c.setor_publico,
             c.status_atribuicao, c.status_cliente, c.classificacao_abc,
             c.vendedor_responsavel_id, c.ativo,
-            COALESCE(c.dormente, false) as dormente
+            COALESCE(c.dormente, false) as dormente,
+            -- Cancelamento total: todos itens recorrentes ativos em PROGRAMADO
+            EXISTS (
+                SELECT 1 FROM contratos ct
+                JOIN propostas_contrato p ON p.contrato_id = ct.id
+                JOIN itens_contrato i ON i.proposta_id = p.id
+                WHERE ct.cliente_id = c.id
+                AND ct.status = 'ATIVO'
+                AND i.recorrente = true
+                AND COALESCE(i.status_item,'ATIVO') NOT IN ('CANCELADO','TROCADO')
+            ) AND NOT EXISTS (
+                SELECT 1 FROM contratos ct
+                JOIN propostas_contrato p ON p.contrato_id = ct.id
+                JOIN itens_contrato i ON i.proposta_id = p.id
+                WHERE ct.cliente_id = c.id
+                AND ct.status = 'ATIVO'
+                AND i.recorrente = true
+                AND COALESCE(i.status_item,'ATIVO') NOT IN ('CANCELADO','TROCADO')
+                AND COALESCE(i.status_cancelamento,'') != 'PROGRAMADO'
+            ) as em_cancelamento_total,
+            -- Data de vencimento do cancelamento
+            (
+                SELECT MAX(i.fim_aviso_previo)
+                FROM contratos ct
+                JOIN propostas_contrato p ON p.contrato_id = ct.id
+                JOIN itens_contrato i ON i.proposta_id = p.id
+                WHERE ct.cliente_id = c.id
+                AND i.status_cancelamento = 'PROGRAMADO'
+            ) as fim_cancelamento
         FROM clientes c
         {where_sql}
         ORDER BY c.razao_social
@@ -211,6 +239,8 @@ async def listar_clientes(
             "vendedor_responsavel_id": str(r[14]) if r[14] else None,
             "ativo": r[15],
             "dormente": bool(r[16]),
+            "em_cancelamento_total": bool(r[17]) if r[17] is not None else False,
+            "fim_cancelamento": r[18] if r[18] else None,
         }
         for r in rows
     ]
@@ -245,7 +275,33 @@ async def detalhe_cliente(
                status_cliente, classificacao_abc, frequencia_visita_dias,
                ultima_visita_em, proxima_visita_prevista, observacoes,
                vendedor_responsavel_id, ativo,
-               COALESCE(dormente, false) as dormente
+               COALESCE(dormente, false) as dormente,
+               EXISTS (
+                   SELECT 1 FROM contratos ct
+                   JOIN propostas_contrato p ON p.contrato_id = ct.id
+                   JOIN itens_contrato i ON i.proposta_id = p.id
+                   WHERE ct.cliente_id = :cid
+                   AND ct.status = 'ATIVO'
+                   AND i.recorrente = true
+                   AND COALESCE(i.status_item,'ATIVO') NOT IN ('CANCELADO','TROCADO')
+               ) AND NOT EXISTS (
+                   SELECT 1 FROM contratos ct
+                   JOIN propostas_contrato p ON p.contrato_id = ct.id
+                   JOIN itens_contrato i ON i.proposta_id = p.id
+                   WHERE ct.cliente_id = :cid
+                   AND ct.status = 'ATIVO'
+                   AND i.recorrente = true
+                   AND COALESCE(i.status_item,'ATIVO') NOT IN ('CANCELADO','TROCADO')
+                   AND COALESCE(i.status_cancelamento,'') != 'PROGRAMADO'
+               ) as em_cancelamento_total,
+               (
+                   SELECT MAX(i.fim_aviso_previo)
+                   FROM contratos ct
+                   JOIN propostas_contrato p ON p.contrato_id = ct.id
+                   JOIN itens_contrato i ON i.proposta_id = p.id
+                   WHERE ct.cliente_id = :cid
+                   AND i.status_cancelamento = 'PROGRAMADO'
+               ) as fim_cancelamento
         FROM clientes WHERE id = :cid AND ativo = true
     """), {"cid": str(cliente_id)})
     cl_row = res_cl.fetchone()
@@ -264,6 +320,8 @@ async def detalhe_cliente(
         "proxima_visita_prevista": cl_row[16], "observacoes": cl_row[17],
         "vendedor_responsavel_id": cl_row[18], "ativo": cl_row[19],
         "dormente": bool(cl_row[20]),
+        "em_cancelamento_total": bool(cl_row[21]) if cl_row[21] is not None else False,
+        "fim_cancelamento": cl_row[22] if cl_row[22] else None,
     })()
 
     # Buscar contratos
@@ -329,6 +387,8 @@ async def detalhe_cliente(
         "vendedor_responsavel_id": str(cliente.vendedor_responsavel_id) if cliente.vendedor_responsavel_id else None,
         "ativo": cliente.ativo,
         "dormente": cliente.dormente,
+        "em_cancelamento_total": cliente.em_cancelamento_total,
+        "fim_cancelamento": cliente.fim_cancelamento,
         "historico_vendas": historico_vendas,
         "contratos": [
             {
@@ -919,16 +979,19 @@ async def importar_csv(
 
             if prop_key not in propostas_set:
                 propostas_set.add(prop_key)
+                new_prop_id = str(uuid_mod.uuid4())
                 await db.execute(sqlt("""
                     INSERT INTO propostas_contrato (id,contrato_id,numero_proposta,planilha_financeira,data_assinatura,modalidade,valor_total,valor_recorrente)
                     VALUES (:i,:c,:n,:p,:d,:m,0,0)
-                    ON CONFLICT (contrato_id, numero_proposta) DO NOTHING
-                """), {"i":str(uuid_mod.uuid4()),"c":ct_id_real,"n":num_prop,"p":plan_fin,"d":data_ass_cont,"m":_nulo(row.get("Modalidade de Vendas",""))})
+                    ON CONFLICT DO NOTHING
+                """), {"i":new_prop_id,"c":ct_id_real,"n":num_prop,"p":plan_fin,"d":data_ass_cont,"m":_nulo(row.get("Modalidade de Vendas",""))})
+                await db.flush()
 
             res_prop = await db.execute(sqlt("SELECT id FROM propostas_contrato WHERE contrato_id=:c AND numero_proposta=:n"), {"c":ct_id_real,"n":num_prop})
             prop_row = res_prop.fetchone()
             if not prop_row: continue
             prop_id_real = str(prop_row[0])
+            propostas_ids[(ct_id_real, num_prop)] = prop_id_real
 
             # Inserir item
             st_cancel = _nulo(row.get("Status Cancelamento",""))
@@ -945,8 +1008,82 @@ async def importar_csv(
             await db.execute(sqlt("""
                 INSERT INTO itens_contrato (id,proposta_id,contrato_id,codigo_produto,descricao_produto,quantidade,valor_unitario,valor_total,recorrente,status_cancelamento,status_item,data_assinatura_item)
                 VALUES (:i,:p,:c,:cp,:dp,:q,:vu,:vt,:r,:sc,:si,:di)
-                ON CONFLICT DO NOTHING
             """), {"i":str(uuid_mod.uuid4()),"p":prop_id_real,"c":ct_id_real,"cp":cod_prod,"dp":desc_prod,"q":qtd,"vu":val_unit,"vt":val_tot,"r":rec_item,"sc":st_cancel,"si":st_item,"di":data_item})
+
+        # Recalcular data das propostas baseado no item mais antigo
+        await db.execute(sqlt("""
+            UPDATE propostas_contrato p SET data_assinatura = sub.data_min
+            FROM (
+                SELECT proposta_id, MIN(data_assinatura_item) as data_min
+                FROM itens_contrato
+                WHERE data_assinatura_item IS NOT NULL
+                GROUP BY proposta_id
+            ) sub
+            WHERE p.id = sub.proposta_id
+        """))
+
+        # Recalcular valor_recorrente das propostas
+        # MRR exclui apenas: CANCELADO e GRATUITO e TROCADO
+        # PROGRAMADO (aviso prévio) ainda é cobrado — inclui no MRR
+        await db.execute(sqlt("""
+            UPDATE propostas_contrato p SET valor_recorrente = COALESCE(sub.mrr, 0)
+            FROM (
+                SELECT proposta_id,
+                       SUM(valor_total) FILTER (
+                           WHERE recorrente = true
+                           AND COALESCE(status_cancelamento, '') NOT IN ('CANCELADO')
+                           AND COALESCE(status_item, 'ATIVO') NOT IN ('CANCELADO', 'GRATUITO', 'TROCADO')
+                       ) as mrr
+                FROM itens_contrato
+                GROUP BY proposta_id
+            ) sub
+            WHERE p.id = sub.proposta_id
+        """))
+
+        # Recalcular valor_mensal dos contratos ATIVOS
+        await db.execute(sqlt("""
+            UPDATE contratos c SET valor_mensal = COALESCE(sub.mrr, 0)
+            FROM (
+                SELECT p.contrato_id, SUM(p.valor_recorrente) as mrr
+                FROM propostas_contrato p
+                GROUP BY p.contrato_id
+            ) sub
+            WHERE c.id = sub.contrato_id
+            AND c.status = 'ATIVO'
+        """))
+
+        # Recalcular classificação ABC dos clientes
+        await db.execute(sqlt("""
+            UPDATE clientes c SET classificacao_abc =
+                CASE
+                    WHEN COALESCE(ct.mrr,0) >= COALESCE((SELECT mrr_cliente_a FROM parametros_organizacao LIMIT 1),5000) THEN 'A'
+                    WHEN COALESCE(ct.mrr,0) >= COALESCE((SELECT mrr_cliente_b FROM parametros_organizacao LIMIT 1),1000) THEN 'B'
+                    ELSE 'C'
+                END
+            FROM (
+                SELECT cliente_id, SUM(valor_mensal) as mrr
+                FROM contratos WHERE status='ATIVO'
+                GROUP BY cliente_id
+            ) ct
+            WHERE c.id = ct.cliente_id
+        """))
+
+        # Recalcular clientes dormentes
+        await db.execute(sqlt(f"""
+            UPDATE clientes c SET dormente =
+                CASE
+                    WHEN ult.ultima_compra < CURRENT_DATE - INTERVAL '18 months' THEN true
+                    ELSE false
+                END
+            FROM (
+                SELECT ct.cliente_id, MAX(p.data_assinatura) as ultima_compra
+                FROM propostas_contrato p
+                JOIN contratos ct ON ct.id = p.contrato_id
+                WHERE p.data_assinatura IS NOT NULL
+                GROUP BY ct.cliente_id
+            ) ult
+            WHERE c.id = ult.cliente_id
+        """))
 
         await db.commit()
 
@@ -977,13 +1114,12 @@ async def propostas_contrato(
     db: AsyncSession = Depends(get_db),
 ):
     from sqlalchemy import text
-    # Buscar propostas com seus itens
     res_p = await db.execute(text("""
         SELECT id, numero_proposta, planilha_financeira,
                data_assinatura, modalidade, valor_total, valor_recorrente
         FROM propostas_contrato
         WHERE contrato_id = :cid
-        ORDER BY valor_recorrente DESC, valor_total DESC
+        ORDER BY data_assinatura DESC NULLS LAST, valor_recorrente DESC
     """), {"cid": str(contrato_id)})
     propostas = res_p.fetchall()
 
@@ -995,10 +1131,25 @@ async def propostas_contrato(
                    modalidade, data_vencimento,
                    COALESCE(status_cancelamento, '') as status_cancelamento,
                    data_assinatura_item,
-                   COALESCE(status_item, 'ATIVO') as status_item
+                   COALESCE(status_item, 'ATIVO') as status_item,
+                   COALESCE(periodo_aviso_previo, 0) as periodo_aviso_previo,
+                   inicio_aviso_previo,
+                   fim_aviso_previo
             FROM itens_contrato
             WHERE proposta_id = :pid
-            ORDER BY recorrente DESC, valor_total DESC
+            ORDER BY
+                CASE COALESCE(status_item,'ATIVO')
+                    WHEN 'CANCELADO' THEN 3
+                    WHEN 'TROCADO'   THEN 2
+                    ELSE 0
+                END,
+                CASE COALESCE(status_cancelamento,'')
+                    WHEN 'CANCELADO'  THEN 3
+                    WHEN 'PROGRAMADO' THEN 2
+                    ELSE 0
+                END,
+                recorrente DESC,
+                valor_total DESC
         """), {"pid": str(p[0])})
         itens = res_i.fetchall()
 
@@ -1015,13 +1166,20 @@ async def propostas_contrato(
                     "id": str(i[0]),
                     "codigo_produto": i[1],
                     "descricao_produto": i[2],
-                    "agrupador": i[3],
                     "quantidade": float(i[4]) if i[4] else 1,
                     "valor_unitario": float(i[5]) if i[5] else 0,
                     "valor_total": float(i[6]) if i[6] else 0,
-                    "recorrente": i[7],
-                    "modalidade": i[8],
-                    "data_vencimento": str(i[9]) if i[9] else None,
+                    "recorrente": bool(i[7]),
+                    "cancelado":  i[10] == "CANCELADO",
+                    "programado": i[10] == "PROGRAMADO",
+                    "trocado":    i[12] == "TROCADO",
+                    "gratuito":   i[12] == "GRATUITO",
+                    "data_assinatura_item": str(i[11]) if i[11] else None,
+                    "status_item": i[12] if i[12] else "ATIVO",
+                    "status_cancelamento": i[10],
+                    "periodo_aviso_previo": float(i[13]) if i[13] else 0,
+                    "inicio_aviso_previo": i[14] if i[14] else None,
+                    "fim_aviso_previo": i[15] if i[15] else None,
                 }
                 for i in itens
             ]
@@ -1356,7 +1514,7 @@ async def importar_csv_selecionado(
             vinculos_criados+=1
 
         clientes_set = set(); contratos_set = set()
-        propostas_set = set(); propostas_ids = {}
+        propostas_set = set(); propostas_ids = {}; contratos_ids = {}
         avisos = []; erros = []
 
         # Pré-processar: mapear ESN real por cliente (para herança)
@@ -1425,55 +1583,158 @@ async def importar_csv_selecionado(
                 clientes_criados+=1
 
             num_ct = row["Número do Contrato"].strip()
-            if num_ct and num_ct not in contratos_set:
-                if contratos_sel and num_ct not in contratos_sel: continue
-                if clientes_sel and cod_cli not in clientes_sel: continue
+            if not num_ct: continue
+            if contratos_sel and num_ct not in contratos_sel: continue
+            if clientes_sel and cod_cli not in clientes_sel: continue
+
+            # Criar contrato uma única vez por número
+            if num_ct not in contratos_set:
                 contratos_set.add(num_ct)
-                res_cli = await db.execute(sqlt("SELECT id FROM clientes WHERE codigo_externo=:c"), {"c":cod_cli})
-                row_cli = res_cli.fetchone()
-                if row_cli:
-                    st = ct_status_final.get(num_ct, "PENDENTE")
-                    ct_id = str(uuid_mod.uuid4())
-                    await db.execute(sqlt("""
-                        INSERT INTO contratos (id,cliente_id,numero_contrato,status,recorrente,modalidade,unidade_venda)
-                        VALUES (:i,:c,:n,:s,:r,:m,:u) ON CONFLICT (numero_contrato) DO UPDATE SET status=EXCLUDED.status
-                        RETURNING id
-                    """), {"i":ct_id,"c":str(row_cli[0]),"n":num_ct,"s":st,"r":_bool(row["Recorrente"]),"m":_nulo(row["Modalidade de Vendas"]),"u":_nulo(row.get("Nome Unidade de Venda",""))})
-                    res_ct_id = await db.execute(sqlt("SELECT id FROM contratos WHERE numero_contrato=:n"), {"n":num_ct})
-                    ct_id_real = str(res_ct_id.fetchone()[0])
-                    contratos_criados+=1
-                    # Registrar proposta + itens
-                    num_prop = _nulo(row.get("Número da Proposta","")) or num_ct
-                    plan_fin = _nulo(row.get("Planilha Financeira no Contrato",""))
-                    data_ass_cont = _data(row.get("Data de Assinatura",""))
-                    prop_key = (ct_id_real, num_prop)
-                    if prop_key not in propostas_set:
-                        propostas_set.add(prop_key)
-                        prop_id = str(uuid_mod.uuid4())
-                        await db.execute(sqlt("""
-                            INSERT INTO propostas_contrato (id,contrato_id,numero_proposta,planilha_financeira,data_assinatura,modalidade,valor_total,valor_recorrente)
-                            VALUES (:i,:c,:n,:p,:d,:m,0,0)
-                            ON CONFLICT (contrato_id, numero_proposta) DO NOTHING
-                        """), {"i":prop_id,"c":ct_id_real,"n":num_prop,"p":plan_fin,"d":data_ass_cont,"m":_nulo(row.get("Modalidade de Vendas",""))})
-                        res_prop = await db.execute(sqlt("SELECT id FROM propostas_contrato WHERE contrato_id=:c AND numero_proposta=:n"), {"c":ct_id_real,"n":num_prop})
-                        prop_id_real = str(res_prop.fetchone()[0])
-                        propostas_ids[(ct_id_real, num_prop)] = prop_id_real
-                    prop_id_real = propostas_ids.get((ct_id_real, num_prop), prop_id if "prop_id" in dir() else None)
-                    if prop_id_real:
-                        st_cancel = _nulo(row.get("Status Cancelamento",""))
-                        data_item = _data(row.get("Data de Assinatura do Item","")) or data_ass_cont
-                        val_unit  = _val(row.get("Valor Unitário",""))
-                        val_tot   = _val(row.get("Valor Total do Contrato",""))
-                        qtd       = int(float(row.get("Quantidade do Item","1").replace(",",".") or 1))
-                        cod_prod  = _nulo(row.get("Código do Produto",""))
-                        desc_prod = _nulo(row.get("Descrição do Produto",""))
-                        rec_item  = _bool(row.get("Recorrente","NAO"))
-                        st_item = row.get("Status do Contrato","").strip().upper()
-                        await db.execute(sqlt("""
-                            INSERT INTO itens_contrato (id,proposta_id,contrato_id,codigo_produto,descricao_produto,quantidade,valor_unitario,valor_total,recorrente,status_cancelamento,status_item,data_assinatura_item)
-                            VALUES (:i,:p,:c,:cp,:dp,:q,:vu,:vt,:r,:sc,:si,:di)
-                            ON CONFLICT DO NOTHING
-                        """), {"i":str(uuid_mod.uuid4()),"p":prop_id_real,"c":ct_id_real,"cp":cod_prod,"dp":desc_prod,"q":qtd,"vu":val_unit,"vt":val_tot,"r":rec_item,"sc":st_cancel,"si":st_item,"di":data_item})
+                res_cli2 = await db.execute(sqlt("SELECT id FROM clientes WHERE codigo_externo=:c"), {"c":cod_cli})
+                row_cli2 = res_cli2.fetchone()
+                if not row_cli2: continue
+                st = ct_status_final.get(num_ct, "PENDENTE")
+                await db.execute(sqlt("""
+                    INSERT INTO contratos (id,cliente_id,numero_contrato,status,recorrente,modalidade,unidade_venda)
+                    VALUES (:i,:c,:n,:s,:r,:m,:u)
+                    ON CONFLICT (numero_contrato) DO UPDATE SET status=EXCLUDED.status
+                """), {"i":str(uuid_mod.uuid4()),"c":str(row_cli2[0]),"n":num_ct,"s":st,
+                       "r":_bool(row["Recorrente"]),"m":_nulo(row["Modalidade de Vendas"]),
+                       "u":_nulo(row.get("Nome Unidade de Venda",""))})
+                contratos_criados+=1
+
+            # Cache do ID real do contrato
+            if num_ct not in contratos_ids:
+                res_ct2 = await db.execute(sqlt("SELECT id FROM contratos WHERE numero_contrato=:n"), {"n":num_ct})
+                ct_row2 = res_ct2.fetchone()
+                if not ct_row2: continue
+                contratos_ids[num_ct] = str(ct_row2[0])
+            ct_id_real = contratos_ids[num_ct]
+
+            # Criar proposta se não existir
+            num_prop = _nulo(row.get("Número da Proposta","")) or num_ct
+            prop_key = (ct_id_real, num_prop)
+            if prop_key not in propostas_set:
+                propostas_set.add(prop_key)
+                await db.execute(sqlt("""
+                    INSERT INTO propostas_contrato (id,contrato_id,numero_proposta,planilha_financeira,data_assinatura,modalidade,valor_total,valor_recorrente)
+                    VALUES (:i,:c,:n,:p,:d,:m,0,0)
+                    ON CONFLICT ON CONSTRAINT propostas_contrato_contrato_id_numero_proposta_key DO NOTHING
+                """), {"i":str(uuid_mod.uuid4()),"c":ct_id_real,"n":num_prop,
+                       "p":_nulo(row.get("Planilha Financeira no Contrato","")),
+                       "d":_data(row.get("Data de Assinatura","")),
+                       "m":_nulo(row.get("Modalidade de Vendas",""))})
+
+            # Cache do ID real da proposta
+            if prop_key not in propostas_ids:
+                res_p2 = await db.execute(sqlt(
+                    "SELECT id FROM propostas_contrato WHERE contrato_id=:c AND numero_proposta=:n"),
+                    {"c":ct_id_real,"n":num_prop})
+                p_row2 = res_p2.fetchone()
+                if not p_row2: continue
+                propostas_ids[prop_key] = str(p_row2[0])
+            prop_id_real = propostas_ids[prop_key]
+
+            # Inserir item — cada linha do CSV é um item
+            data_ass_cont = _data(row.get("Data de Assinatura",""))
+            # Parse aviso prévio
+            def _mes_ano(v):
+                if not v or v.strip() in ("-",""): return None
+                v = v.strip()
+                if len(v.split("/")) == 2: return v  # já é MM/YYYY, retornar como string
+                return None
+
+            await db.execute(sqlt("""
+                INSERT INTO itens_contrato (id,proposta_id,contrato_id,codigo_produto,descricao_produto,
+                    quantidade,valor_unitario,valor_total,recorrente,status_cancelamento,status_item,
+                    data_assinatura_item,periodo_aviso_previo,inicio_aviso_previo,fim_aviso_previo)
+                VALUES (:i,:p,:c,:cp,:dp,:q,:vu,:vt,:r,:sc,:si,:di,:apm,:iap,:fap)
+            """), {"i":str(uuid_mod.uuid4()),"p":prop_id_real,"c":ct_id_real,
+                   "cp":_nulo(row.get("Código do Produto","")),"dp":_nulo(row.get("Descrição do Produto","")),
+                   "q":int(float(row.get("Quantidade do Item","1").replace(",",".") or 1)),
+                   "vu":_val(row.get("Valor Unitário","")),"vt":_val(row.get("Valor Total do Contrato","")),
+                   "r":_bool(row.get("Recorrente","NAO")),
+                   "sc":_nulo(row.get("Status Cancelamento","")),
+                   "si":row.get("Status do Contrato","").strip().upper(),
+                   "di":_data(row.get("Data de Assinatura do Item","")) or data_ass_cont,
+                   "apm": int(float(row.get("Período do Aviso Prévio","0").replace(",",".") or 0)),
+                   "iap": _mes_ano(row.get("Início Aviso Prévio","")),
+                   "fap": _mes_ano(row.get("Final do Aviso Prévio (Cancelamento)",""))})
+
+        # ── Recálculos pós-importação ─────────────────────────────────────
+
+        # 1. Data da proposta = menor data_assinatura_item de seus itens
+        await db.execute(sqlt("""
+            UPDATE propostas_contrato p SET data_assinatura = sub.data_min
+            FROM (
+                SELECT proposta_id, MIN(data_assinatura_item) as data_min
+                FROM itens_contrato
+                WHERE data_assinatura_item IS NOT NULL
+                GROUP BY proposta_id
+            ) sub
+            WHERE p.id = sub.proposta_id
+        """))
+
+        # 2. MRR por proposta — exclui CANCELADO e TROCADO, inclui GRATUITO e PROGRAMADO
+        await db.execute(sqlt("""
+            UPDATE propostas_contrato p SET valor_recorrente = COALESCE(sub.mrr, 0)
+            FROM (
+                SELECT proposta_id,
+                       SUM(valor_total) FILTER (
+                           WHERE recorrente = true
+                           AND COALESCE(status_cancelamento,'') NOT IN ('CANCELADO')
+                           AND COALESCE(status_item,'ATIVO') NOT IN ('CANCELADO','TROCADO')
+                       ) as mrr
+                FROM itens_contrato
+                GROUP BY proposta_id
+            ) sub
+            WHERE p.id = sub.proposta_id
+        """))
+
+        # 3. valor_mensal dos contratos ATIVOS
+        await db.execute(sqlt("""
+            UPDATE contratos c SET valor_mensal = COALESCE(sub.mrr, 0)
+            FROM (
+                SELECT contrato_id, SUM(valor_recorrente) as mrr
+                FROM propostas_contrato
+                GROUP BY contrato_id
+            ) sub
+            WHERE c.id = sub.contrato_id
+            AND c.status = 'ATIVO'
+        """))
+
+        # 4. Classificação ABC dos clientes
+        await db.execute(sqlt("""
+            UPDATE clientes c SET classificacao_abc =
+                CASE
+                    WHEN COALESCE(ct.mrr,0) >= COALESCE((SELECT mrr_cliente_a FROM parametros_organizacao LIMIT 1),5000) THEN 'A'
+                    WHEN COALESCE(ct.mrr,0) >= COALESCE((SELECT mrr_cliente_b FROM parametros_organizacao LIMIT 1),1000) THEN 'B'
+                    ELSE 'C'
+                END
+            FROM (
+                SELECT cliente_id, SUM(valor_mensal) as mrr
+                FROM contratos WHERE status='ATIVO'
+                GROUP BY cliente_id
+            ) ct
+            WHERE c.id = ct.cliente_id
+        """))
+
+        # 5. Clientes dormentes — baseado na data da última proposta
+        await db.execute(sqlt(f"""
+            UPDATE clientes c SET dormente =
+                CASE
+                    WHEN ult.ultima_compra < CURRENT_DATE - INTERVAL '18 months' THEN true
+                    ELSE false
+                END
+            FROM (
+                SELECT ct.cliente_id, MAX(p.data_assinatura) as ultima_compra
+                FROM propostas_contrato p
+                JOIN contratos ct ON ct.id = p.contrato_id
+                WHERE p.data_assinatura IS NOT NULL
+                GROUP BY ct.cliente_id
+            ) ult
+            WHERE c.id = ult.cliente_id
+        """))
 
         await db.commit()
         return {"sucesso":True,"organizacoes_criadas":org_criada,"usuarios_criados":usuarios_criados,"vinculos_criados":vinculos_criados,"clientes_criados":clientes_criados,"contratos_criados":contratos_criados,"avisos":avisos,"erros":erros}
