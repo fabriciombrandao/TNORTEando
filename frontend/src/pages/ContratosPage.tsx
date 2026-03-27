@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, ChevronDown, ChevronUp, RefreshCw, Package, AlertCircle, XCircle } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronUp, RefreshCw, Package, AlertCircle, XCircle, AlertTriangle } from "lucide-react";
 import api from "../services/api";
 
 const getCliente   = (id: string) => api.get(`/api/v1/clientes/${id}`).then(r => r.data);
@@ -24,21 +24,73 @@ function diasParaVencer(data: string | null) {
 
 function BadgeStatus({ status }: { status: string }) {
   const map: Record<string, string> = {
-    ATIVO: "bg-emerald-50 text-emerald-700",
+    ATIVO:     "bg-emerald-50 text-emerald-700",
     CANCELADO: "bg-red-50 text-red-700",
-    GRATUITO: "bg-blue-50 text-blue-700",
-    TROCADO: "bg-amber-50 text-amber-700",
-    PENDENTE: "bg-amber-50 text-amber-700",
-    MANUAL: "bg-slate-100 text-slate-500",
+    GRATUITO:  "bg-blue-50 text-blue-700",
+    TROCADO:   "bg-slate-100 text-slate-500",
+    PENDENTE:  "bg-amber-50 text-amber-700",
+    MANUAL:    "bg-slate-100 text-slate-500",
   };
   const labels: Record<string, string> = {
-    ATIVO: "Ativo", CANCELADO: "Cancelado", GRATUITO: "Gratuito",
-    TROCADO: "Trocado", PENDENTE: "Pendente", MANUAL: "Manual",
+    ATIVO:"Ativo", CANCELADO:"Cancelado", GRATUITO:"Gratuito",
+    TROCADO:"Trocado", PENDENTE:"Pendente", MANUAL:"Manual",
   };
   return (
     <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${map[status] || "bg-slate-100 text-slate-500"}`}>
       {labels[status] || status}
     </span>
+  );
+}
+
+function ItemRow({ item }: { item: any }) {
+  const cancelado  = item.cancelado;
+  const programado = item.programado;
+  const trocado    = item.trocado;
+  const gratuito   = item.gratuito;
+  const inativo    = cancelado || trocado;
+
+  return (
+    <div className={`grid grid-cols-[1fr_36px_64px_72px] gap-1 text-xs items-start px-4 py-2 border-b border-slate-50 last:border-0 ${
+      inativo ? "opacity-50 bg-slate-50/50" : programado ? "bg-amber-50/30" : ""
+    }`}>
+      <div>
+        <p className={`font-medium leading-tight ${inativo ? "line-through text-slate-400" : "text-slate-800"}`}>
+          {item.descricao_produto}
+        </p>
+        {item.codigo_produto && (
+          <p className="text-slate-400 font-mono text-xs mt-0.5">{item.codigo_produto}</p>
+        )}
+        {cancelado && (
+          <span className="inline-flex items-center gap-0.5 text-xs text-red-500 font-medium mt-0.5">
+            <XCircle className="w-3 h-3" /> Cancelado
+          </span>
+        )}
+        {trocado && !cancelado && (
+          <span className="text-xs text-slate-400 font-medium mt-0.5 block">Trocado</span>
+        )}
+        {programado && !cancelado && (
+          <span className="inline-flex items-center gap-0.5 text-xs text-amber-600 font-medium mt-0.5">
+            <AlertTriangle className="w-3 h-3" />
+            Aviso prévio{item.fim_aviso_previo ? ` até ${item.fim_aviso_previo}` : ""}
+          </span>
+        )}
+        {gratuito && !cancelado && !trocado && (
+          <span className="text-xs text-emerald-500 font-medium mt-0.5 block">Gratuito</span>
+        )}
+      </div>
+      <p className="text-slate-400 text-center pt-0.5">{item.quantidade}</p>
+      <p className="text-slate-400 text-right pt-0.5">
+        {item.valor_unitario > 0 ? formatBRL(item.valor_unitario) : "—"}
+      </p>
+      <p className={`font-semibold text-right pt-0.5 ${
+        inativo    ? "text-slate-300" :
+        programado ? "text-amber-600" :
+        gratuito   ? "text-emerald-400" :
+        item.recorrente ? "text-emerald-600" : "text-slate-500"
+      }`}>
+        {formatBRL(item.valor_total)}
+      </p>
+    </div>
   );
 }
 
@@ -51,18 +103,16 @@ function ContratoCard({ contrato }: { contrato: any }) {
     enabled: aberto,
   });
 
-  const todosItens   = (propostas as any[]).flatMap((p: any) => p.itens || []);
-  const itensRec     = todosItens.filter((i: any) => i.recorrente);
-  const itensNRec    = todosItens.filter((i: any) => !i.recorrente);
-  const mrr          = contrato.valor_mensal || 0;
-  const diasVencer   = diasParaVencer(contrato.data_vigencia_fim);
+  const mrr = contrato.valor_mensal || 0;
+  const diasVencer = diasParaVencer(contrato.data_vigencia_fim);
   const alertaVencer = diasVencer !== null && diasVencer >= 0 && diasVencer <= 90;
-  const vencido      = diasVencer !== null && diasVencer < 0;
+  const vencido = diasVencer !== null && diasVencer < 0;
 
   return (
-    <div className={`bg-white rounded-xl border overflow-hidden ${contrato.status === "ATIVO" ? "border-slate-200" : "border-slate-100 opacity-70"}`}>
-
-      {/* Header do contrato */}
+    <div className={`bg-white rounded-xl border overflow-hidden ${
+      contrato.status === "ATIVO"     ? "border-slate-200" :
+      contrato.status === "CANCELADO" ? "border-red-100"   : "border-slate-100 opacity-70"
+    }`}>
       <div className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
            onClick={() => setAberto(!aberto)}>
         <div className="flex-1 min-w-0">
@@ -80,10 +130,7 @@ function ContratoCard({ contrato }: { contrato: any }) {
               </span>
             )}
           </div>
-          <p className="text-xs text-slate-400 mt-0.5">
-            {contrato.modalidade || "—"}
-            {contrato.data_vigencia_fim && ` · até ${formatDate(contrato.data_vigencia_fim)}`}
-          </p>
+          <p className="text-xs text-slate-400 mt-0.5">{contrato.modalidade || "—"}</p>
         </div>
         <div className="text-right flex-shrink-0">
           {mrr > 0 && <p className="text-sm font-bold text-emerald-600">{formatBRL(mrr)}/mês</p>}
@@ -93,7 +140,6 @@ function ContratoCard({ contrato }: { contrato: any }) {
         </div>
       </div>
 
-      {/* Propostas + Itens */}
       {aberto && (
         <div className="border-t border-slate-100">
           {isLoading ? (
@@ -101,70 +147,67 @@ function ContratoCard({ contrato }: { contrato: any }) {
           ) : (propostas as any[]).length === 0 ? (
             <p className="text-center text-slate-400 text-sm py-4">Nenhuma proposta.</p>
           ) : (
-            (propostas as any[]).map((proposta: any) => (
-              <div key={proposta.id} className="border-b border-slate-50 last:border-0">
-                {/* Header proposta */}
-                <div className="flex items-center justify-between px-4 py-2 bg-slate-50/50">
-                  <div>
-                    <span className="text-xs font-semibold text-slate-600">Proposta {proposta.numero_proposta}</span>
-                    {proposta.data_assinatura && (
-                      <span className="text-xs text-slate-400 ml-2">{formatDate(proposta.data_assinatura)}</span>
+            (propostas as any[]).map((proposta: any, idx: number) => {
+              const itensRec  = (proposta.itens || []).filter((i: any) =>  i.recorrente);
+              const itensNRec = (proposta.itens || []).filter((i: any) => !i.recorrente);
+              const isUltima  = idx === 0;
+
+              return (
+                <div key={proposta.id} className="border-b border-slate-50 last:border-0">
+                  {/* Header proposta */}
+                  <div className={`flex items-center justify-between px-4 py-2 ${isUltima ? "bg-indigo-50/40" : "bg-slate-50/50"}`}>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-slate-700">
+                          Proposta {proposta.numero_proposta}
+                        </span>
+                        {isUltima && (
+                          <span className="text-xs bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded font-medium">
+                            Mais recente
+                          </span>
+                        )}
+                      </div>
+                      {proposta.data_assinatura && (
+                        <p className="text-xs text-slate-400 mt-0.5">{formatDate(proposta.data_assinatura)}</p>
+                      )}
+                    </div>
+                    {proposta.valor_recorrente > 0 && (
+                      <span className="text-xs font-bold text-emerald-600">
+                        {formatBRL(proposta.valor_recorrente)}/mês
+                      </span>
                     )}
                   </div>
-                  {proposta.valor_recorrente > 0 && (
-                    <span className="text-xs font-semibold text-emerald-600">{formatBRL(proposta.valor_recorrente)}/mês</span>
+
+                  {/* Cabeçalho colunas */}
+                  <div className="grid grid-cols-[1fr_36px_64px_72px] gap-1 px-4 py-1.5 bg-slate-50/30">
+                    <span className="text-xs text-slate-400 font-medium">Produto</span>
+                    <span className="text-xs text-slate-400 font-medium text-center">Qtd</span>
+                    <span className="text-xs text-slate-400 font-medium text-right">Unit.</span>
+                    <span className="text-xs text-slate-400 font-medium text-right">Total</span>
+                  </div>
+
+                  {/* Itens recorrentes */}
+                  {itensRec.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium text-emerald-600 flex items-center gap-1 px-4 pt-2 pb-1">
+                        <RefreshCw className="w-3 h-3" /> Recorrentes
+                      </p>
+                      {itensRec.map((item: any) => <ItemRow key={item.id} item={item} />)}
+                    </div>
+                  )}
+
+                  {/* Itens não recorrentes */}
+                  {itensNRec.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium text-slate-400 flex items-center gap-1 px-4 pt-2 pb-1">
+                        <Package className="w-3 h-3" /> Não recorrentes
+                      </p>
+                      {itensNRec.map((item: any) => <ItemRow key={item.id} item={item} />)}
+                    </div>
                   )}
                 </div>
-
-                {/* Itens recorrentes */}
-                {(proposta.itens || []).filter((i: any) => i.recorrente).length > 0 && (
-                  <div className="px-4 py-2">
-                    <p className="text-xs font-medium text-emerald-600 flex items-center gap-1 mb-1.5">
-                      <RefreshCw className="w-3 h-3" /> Recorrentes
-                    </p>
-                    <div className="space-y-1">
-                      {(proposta.itens || []).filter((i: any) => i.recorrente).map((item: any) => (
-                        <div key={item.id} className={`grid grid-cols-[1fr_36px_70px] gap-2 text-xs items-center ${item.cancelado ? "opacity-40" : item.gratuito ? "opacity-60" : ""}`}>
-                          <p className={`font-medium truncate ${item.cancelado ? "line-through text-slate-400" : "text-slate-700"}`}>
-                            {item.descricao_produto}
-                            {item.cancelado && <span className="ml-1 text-red-400">(cancelado)</span>}
-                            {item.gratuito && !item.cancelado && <span className="ml-1 text-emerald-500">(gratuito)</span>}
-                          </p>
-                          <p className="text-slate-400 text-center">{item.quantidade}</p>
-                          <p className={`font-semibold text-right ${item.cancelado ? "text-slate-300" : item.gratuito ? "text-emerald-400" : "text-emerald-600"}`}>
-                            {item.gratuito ? "Gratuito" : formatBRL(item.valor_total)}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Itens não recorrentes */}
-                {(proposta.itens || []).filter((i: any) => !i.recorrente).length > 0 && (
-                  <div className="px-4 py-2 border-t border-slate-50">
-                    <p className="text-xs font-medium text-slate-400 flex items-center gap-1 mb-1.5">
-                      <Package className="w-3 h-3" /> Não recorrentes
-                    </p>
-                    <div className="space-y-1">
-                      {(proposta.itens || []).filter((i: any) => !i.recorrente).map((item: any) => (
-                        <div key={item.id} className={`grid grid-cols-[1fr_36px_70px] gap-2 text-xs items-center ${item.cancelado ? "opacity-40" : ""}`}>
-                          <p className={`font-medium truncate ${item.cancelado ? "line-through text-slate-400" : "text-slate-700"}`}>
-                            {item.descricao_produto}
-                            {item.cancelado && <span className="ml-1 text-red-400">(cancelado)</span>}
-                            {item.gratuito && !item.cancelado && <span className="ml-1 text-emerald-500">(gratuito)</span>}
-                          </p>
-                          <p className="text-slate-400 text-center">{item.quantidade}</p>
-                          <p className={`text-right ${item.cancelado ? "text-slate-300" : item.gratuito ? "text-emerald-400" : "text-slate-500"}`}>
-                            {item.gratuito ? "Gratuito" : formatBRL(item.valor_total)}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       )}
@@ -195,12 +238,10 @@ export default function ContratosPage() {
   const contratos  = cliente.contratos || [];
   const ctAtivos   = contratos.filter((c: any) => c.status === "ATIVO");
   const ctInativos = contratos.filter((c: any) => c.status !== "ATIVO");
-  const mrr        = ctAtivos.reduce((s: number, c: any) => s + (c.valor_mensal || 0), 0);
+  const mrr = ctAtivos.reduce((s: number, c: any) => s + (c.valor_mensal || 0), 0);
 
   return (
     <div className="min-h-screen bg-slate-50 pb-8">
-
-      {/* Header */}
       <div className="bg-white border-b border-slate-100 px-4 py-3 flex items-center gap-3 sticky top-0 z-10">
         <button onClick={() => navigate(-1)}
           className="w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50 flex-shrink-0">
@@ -213,9 +254,7 @@ export default function ContratosPage() {
       </div>
 
       <div className="p-4 space-y-3 max-w-2xl mx-auto">
-
-        {/* KPI */}
-        <div className="bg-white rounded-xl border border-slate-100 p-4" style={{borderTop: "2px solid #34c77b"}}>
+        <div className="bg-white rounded-xl border border-slate-100 p-4" style={{borderTop:"2px solid #34c77b"}}>
           <div className="flex items-center justify-between">
             <div>
               <p className="text-2xl font-bold text-emerald-600">{formatBRL(mrr)}/mês</p>
@@ -228,7 +267,6 @@ export default function ContratosPage() {
           </div>
         </div>
 
-        {/* Contratos ativos */}
         {ctAtivos.length > 0 && (
           <div className="space-y-2">
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide px-1">Ativos</p>
@@ -236,14 +274,12 @@ export default function ContratosPage() {
           </div>
         )}
 
-        {/* Contratos inativos */}
         {ctInativos.length > 0 && (
           <div className="space-y-2">
             <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide px-1">Histórico</p>
             {ctInativos.map((ct: any) => <ContratoCard key={ct.id} contrato={ct} />)}
           </div>
         )}
-
       </div>
     </div>
   );
