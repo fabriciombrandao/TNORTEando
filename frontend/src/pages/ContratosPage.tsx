@@ -1,7 +1,6 @@
-import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, ChevronDown, ChevronUp, RefreshCw, Package, AlertCircle, XCircle, AlertTriangle } from "lucide-react";
+import { ArrowLeft, RefreshCw, Package, AlertCircle, XCircle, AlertTriangle, Loader2 } from "lucide-react";
 import api from "../services/api";
 
 const getCliente   = (id: string) => api.get(`/api/v1/clientes/${id}`).then(r => r.data);
@@ -95,12 +94,9 @@ function ItemRow({ item }: { item: any }) {
 }
 
 function ContratoCard({ contrato }: { contrato: any }) {
-  const [aberto, setAberto] = useState(false);
-
   const { data: propostas = [], isLoading } = useQuery({
     queryKey: ["propostas", contrato.id],
     queryFn: () => getPropostas(contrato.id),
-    enabled: aberto,
   });
 
   const mrr = contrato.valor_mensal || 0;
@@ -113,8 +109,8 @@ function ContratoCard({ contrato }: { contrato: any }) {
       contrato.status === "ATIVO"     ? "border-slate-200" :
       contrato.status === "CANCELADO" ? "border-red-100"   : "border-slate-100 opacity-70"
     }`}>
-      <div className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
-           onClick={() => setAberto(!aberto)}>
+      {/* Header do contrato */}
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-100">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs font-mono text-slate-400">{contrato.numero_contrato}</span>
@@ -132,84 +128,79 @@ function ContratoCard({ contrato }: { contrato: any }) {
           </div>
           <p className="text-xs text-slate-400 mt-0.5">{contrato.modalidade || "—"}</p>
         </div>
-        <div className="text-right flex-shrink-0">
-          {mrr > 0 && <p className="text-sm font-bold text-emerald-600">{formatBRL(mrr)}/mês</p>}
-        </div>
-        <div className="text-slate-300 flex-shrink-0">
-          {aberto ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-        </div>
+        {mrr > 0 && (
+          <p className="text-sm font-bold text-emerald-600 flex-shrink-0">{formatBRL(mrr)}/mês</p>
+        )}
       </div>
 
-      {aberto && (
-        <div className="border-t border-slate-100">
-          {isLoading ? (
-            <p className="text-center text-slate-400 text-sm py-4">Carregando...</p>
-          ) : (propostas as any[]).length === 0 ? (
-            <p className="text-center text-slate-400 text-sm py-4">Nenhuma proposta.</p>
-          ) : (
-            (propostas as any[]).map((proposta: any, idx: number) => {
-              const itensRec  = (proposta.itens || []).filter((i: any) =>  i.recorrente);
-              const itensNRec = (proposta.itens || []).filter((i: any) => !i.recorrente);
-              const isUltima  = idx === 0;
+      {/* Propostas — sempre expandidas */}
+      {isLoading ? (
+        <div className="flex items-center justify-center py-6 gap-2 text-slate-400">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          <span className="text-sm">Carregando propostas...</span>
+        </div>
+      ) : (propostas as any[]).length === 0 ? (
+        <p className="text-center text-slate-400 text-sm py-4">Nenhuma proposta.</p>
+      ) : (
+        (propostas as any[]).map((proposta: any, idx: number) => {
+          const itensRec  = (proposta.itens || []).filter((i: any) =>  i.recorrente);
+          const itensNRec = (proposta.itens || []).filter((i: any) => !i.recorrente);
+          const isUltima  = idx === 0;
 
-              return (
-                <div key={proposta.id} className="border-b border-slate-50 last:border-0">
-                  {/* Header proposta */}
-                  <div className={`flex items-center justify-between px-4 py-2 ${isUltima ? "bg-indigo-50/40" : "bg-slate-50/50"}`}>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-semibold text-slate-700">
-                          Proposta {proposta.numero_proposta}
-                        </span>
-                        {isUltima && (
-                          <span className="text-xs bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded font-medium">
-                            Mais recente
-                          </span>
-                        )}
-                      </div>
-                      {proposta.data_assinatura && (
-                        <p className="text-xs text-slate-400 mt-0.5">{formatDate(proposta.data_assinatura)}</p>
-                      )}
-                    </div>
-                    {proposta.valor_recorrente > 0 && (
-                      <span className="text-xs font-bold text-emerald-600">
-                        {formatBRL(proposta.valor_recorrente)}/mês
+          return (
+            <div key={proposta.id} className="border-b border-slate-50 last:border-0">
+              {/* Header da proposta */}
+              <div className={`flex items-center justify-between px-4 py-2 ${isUltima ? "bg-indigo-50/40" : "bg-slate-50/50"}`}>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-slate-700">
+                      Proposta {proposta.numero_proposta}
+                    </span>
+                    {isUltima && (
+                      <span className="text-xs bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded font-medium">
+                        Mais recente
                       </span>
                     )}
                   </div>
-
-                  {/* Cabeçalho colunas */}
-                  <div className="grid grid-cols-[1fr_36px_64px_72px] gap-1 px-4 py-1.5 bg-slate-50/30">
-                    <span className="text-xs text-slate-400 font-medium">Produto</span>
-                    <span className="text-xs text-slate-400 font-medium text-center">Qtd</span>
-                    <span className="text-xs text-slate-400 font-medium text-right">Unit.</span>
-                    <span className="text-xs text-slate-400 font-medium text-right">Total</span>
-                  </div>
-
-                  {/* Itens recorrentes */}
-                  {itensRec.length > 0 && (
-                    <div>
-                      <p className="text-xs font-medium text-emerald-600 flex items-center gap-1 px-4 pt-2 pb-1">
-                        <RefreshCw className="w-3 h-3" /> Recorrentes
-                      </p>
-                      {itensRec.map((item: any) => <ItemRow key={item.id} item={item} />)}
-                    </div>
-                  )}
-
-                  {/* Itens não recorrentes */}
-                  {itensNRec.length > 0 && (
-                    <div>
-                      <p className="text-xs font-medium text-slate-400 flex items-center gap-1 px-4 pt-2 pb-1">
-                        <Package className="w-3 h-3" /> Não recorrentes
-                      </p>
-                      {itensNRec.map((item: any) => <ItemRow key={item.id} item={item} />)}
-                    </div>
+                  {proposta.data_assinatura && (
+                    <p className="text-xs text-slate-400 mt-0.5">{formatDate(proposta.data_assinatura)}</p>
                   )}
                 </div>
-              );
-            })
-          )}
-        </div>
+                {proposta.valor_recorrente > 0 && (
+                  <span className="text-xs font-bold text-emerald-600">
+                    {formatBRL(proposta.valor_recorrente)}/mês
+                  </span>
+                )}
+              </div>
+
+              {/* Cabeçalho colunas */}
+              <div className="grid grid-cols-[1fr_36px_64px_72px] gap-1 px-4 py-1.5 bg-slate-50/30">
+                <span className="text-xs text-slate-400 font-medium">Produto</span>
+                <span className="text-xs text-slate-400 font-medium text-center">Qtd</span>
+                <span className="text-xs text-slate-400 font-medium text-right">Unit.</span>
+                <span className="text-xs text-slate-400 font-medium text-right">Total</span>
+              </div>
+
+              {itensRec.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-emerald-600 flex items-center gap-1 px-4 pt-2 pb-1">
+                    <RefreshCw className="w-3 h-3" /> Recorrentes
+                  </p>
+                  {itensRec.map((item: any) => <ItemRow key={item.id} item={item} />)}
+                </div>
+              )}
+
+              {itensNRec.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-slate-400 flex items-center gap-1 px-4 pt-2 pb-1">
+                    <Package className="w-3 h-3" /> Não recorrentes
+                  </p>
+                  {itensNRec.map((item: any) => <ItemRow key={item.id} item={item} />)}
+                </div>
+              )}
+            </div>
+          );
+        })
       )}
     </div>
   );
@@ -268,14 +259,14 @@ export default function ContratosPage() {
         </div>
 
         {ctAtivos.length > 0 && (
-          <div className="space-y-2">
+          <div className="space-y-3">
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide px-1">Ativos</p>
             {ctAtivos.map((ct: any) => <ContratoCard key={ct.id} contrato={ct} />)}
           </div>
         )}
 
         {ctInativos.length > 0 && (
-          <div className="space-y-2">
+          <div className="space-y-3">
             <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide px-1">Histórico</p>
             {ctInativos.map((ct: any) => <ContratoCard key={ct.id} contrato={ct} />)}
           </div>
