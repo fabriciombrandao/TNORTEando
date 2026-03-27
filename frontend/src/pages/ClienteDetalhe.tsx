@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import api from "../services/api";
 import {
   ArrowLeft, Building2, MapPin, User,
-  FileText, Clock, FileSearch2, ShoppingBag
+  FileText, Clock, FileSearch2, ShoppingBag, ChevronRight
 } from "lucide-react";
 
 const getCliente  = (id: string) => api.get(`/api/v1/clientes/${id}`).then(r => r.data);
@@ -67,15 +67,16 @@ export default function ClienteDetalhe() {
   const ctAtivos  = contratos.filter((c: any) => c.status === "ATIVO");
   const mrr       = ctAtivos.reduce((s: number, c: any) => s + (c.valor_mensal || 0), 0);
   const hv        = cliente.historico_vendas || {};
-  const totalPropostas = hv.total_vendas || 0;
-  const emCancelamento = hv.em_cancelamento || 0;
+  const totalPropostas  = hv.total_vendas || 0;
+  const emCancelamento  = hv.em_cancelamento || 0;
 
   return (
     <div className="p-4 md:p-6 max-w-5xl animate-fade-in">
 
       {/* Header */}
       <div className="flex items-start gap-3 mb-4">
-        <button onClick={() => navigate("/clientes")} className="w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center text-slate-400 hover:bg-slate-50 flex-shrink-0 mt-0.5">
+        <button onClick={() => navigate("/clientes")}
+          className="w-8 h-8 rounded-lg border border-slate-200 flex items-center justify-center text-slate-400 hover:bg-slate-50 flex-shrink-0 mt-0.5">
           <ArrowLeft className="w-4 h-4" />
         </button>
         <div className="flex-1">
@@ -104,62 +105,61 @@ export default function ClienteDetalhe() {
         <p className="text-xs text-slate-400 uppercase tracking-wide mt-1">MRR — Receita mensal recorrente</p>
       </div>
 
-      {/* Botões de detalhe */}
-      <div className="grid grid-cols-3 gap-3 mb-4">
+      {/* Botões de detalhe — estilo hambúrguer */}
+      <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden mb-4">
 
         {/* Licenciamento */}
-        <button
-          onClick={() => navigate(`/clientes/${id}/licenciamento`)}
-          className="bg-white border border-slate-200 rounded-2xl p-4 text-left hover:border-indigo-300 hover:bg-indigo-50/30 transition-all group"
-        >
-          <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center mb-3">
-            <FileSearch2 className="w-4 h-4 text-emerald-600" />
+        <button onClick={() => navigate(`/clientes/${id}/licenciamento`)}
+          className="w-full flex items-center gap-3 px-4 py-3.5 border-b border-slate-50 hover:bg-slate-50 transition-colors text-left">
+          <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center flex-shrink-0">
+            <FileSearch2 className="w-5 h-5 text-emerald-600" />
           </div>
-          <p className="text-sm font-semibold text-slate-900">Licenciamento</p>
-          <p className="text-xs text-slate-400 mt-1">Produtos ativos</p>
-          {emCancelamento > 0 && (
-            <p className="text-xs text-red-500 mt-0.5 font-medium">{emCancelamento} em cancelamento</p>
-          )}
-          <p className="text-xs text-indigo-400 mt-2 group-hover:text-indigo-600">Ver detalhes →</p>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-slate-900">Licenciamento</p>
+            <p className="text-xs text-slate-400 mt-0.5">Produtos e licenças ativas</p>
+            {emCancelamento > 0 && (
+              <p className="text-xs text-red-500 font-medium mt-0.5">{emCancelamento} em cancelamento</p>
+            )}
+          </div>
+          <ChevronRight className="w-4 h-4 text-slate-300 flex-shrink-0" />
         </button>
 
         {/* Contratos */}
-        <button
-          onClick={() => navigate(`/clientes/${id}/contratos`)}
-          className="bg-white border border-slate-200 rounded-2xl p-4 text-left hover:border-indigo-300 hover:bg-indigo-50/30 transition-all group"
-        >
-          <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center mb-3">
-            <FileText className="w-4 h-4 text-blue-600" />
+        <button onClick={() => navigate(`/clientes/${id}/contratos`)}
+          className="w-full flex items-center gap-3 px-4 py-3.5 border-b border-slate-50 hover:bg-slate-50 transition-colors text-left">
+          <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center flex-shrink-0">
+            <FileText className="w-5 h-5 text-blue-600" />
           </div>
-          <p className="text-sm font-semibold text-slate-900">Contratos</p>
-          <p className="text-xs text-slate-400 mt-1">{ctAtivos.length} ativo{ctAtivos.length !== 1 ? "s" : ""} · {formatBRL(mrr)}/mês</p>
-          <p className="text-xs text-slate-400">{totalPropostas} proposta{totalPropostas !== 1 ? "s" : ""}</p>
-          {emCancelamento > 0 && (
-            <p className="text-xs text-red-500 mt-0.5 font-medium">{emCancelamento} em aviso prévio</p>
-          )}
-          {cliente.em_cancelamento_total && (
-            <p className="text-xs text-red-600 font-semibold mt-0.5">
-              Em cancelamento total{cliente.fim_cancelamento ? ` — vence ${cliente.fim_cancelamento}` : ""}
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-slate-900">Contratos</p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {ctAtivos.length} ativo{ctAtivos.length !== 1 ? "s" : ""} · {totalPropostas} proposta{totalPropostas !== 1 ? "s" : ""}
+              {mrr > 0 ? ` · ${formatBRL(mrr)}/mês` : ""}
             </p>
-          )}
-          <p className="text-xs text-indigo-400 mt-2 group-hover:text-indigo-600">Ver detalhes →</p>
+            {cliente.em_cancelamento_total && (
+              <p className="text-xs text-red-600 font-semibold mt-0.5">
+                Em cancelamento{cliente.fim_cancelamento ? ` — vence ${cliente.fim_cancelamento}` : ""}
+              </p>
+            )}
+          </div>
+          <ChevronRight className="w-4 h-4 text-slate-300 flex-shrink-0" />
         </button>
 
         {/* Histórico de visitas */}
-        <button
-          onClick={() => navigate(`/clientes/${id}/visitas`)}
-          className="bg-white border border-slate-200 rounded-2xl p-4 text-left hover:border-indigo-300 hover:bg-indigo-50/30 transition-all group"
-        >
-          <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center mb-3">
-            <Clock className="w-4 h-4 text-amber-600" />
+        <button onClick={() => navigate(`/clientes/${id}/visitas`)}
+          className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-slate-50 transition-colors text-left">
+          <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center flex-shrink-0">
+            <Clock className="w-5 h-5 text-amber-600" />
           </div>
-          <p className="text-sm font-semibold text-slate-900">Hist. de visitas</p>
-          <p className="text-xs text-slate-400 mt-1">
-            {cliente.ultima_visita_em
-              ? `Última: ${new Date(cliente.ultima_visita_em).toLocaleDateString("pt-BR")}`
-              : "Nunca visitado"}
-          </p>
-          <p className="text-xs text-indigo-400 mt-2 group-hover:text-indigo-600">Ver detalhes →</p>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-slate-900">Histórico de visitas</p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {cliente.ultima_visita_em
+                ? `Última: ${new Date(cliente.ultima_visita_em).toLocaleDateString("pt-BR")}`
+                : "Nunca visitado"}
+            </p>
+          </div>
+          <ChevronRight className="w-4 h-4 text-slate-300 flex-shrink-0" />
         </button>
 
       </div>
@@ -227,7 +227,7 @@ export default function ClienteDetalhe() {
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
                     <span className="text-sm font-bold text-indigo-600">
-                      {vendedor.nome.split(" ").filter(Boolean).slice(0, 2).map((n: string) => n[0]).join("")}
+                      {vendedor.nome.split(" ").filter(Boolean).slice(0,2).map((n: string) => n[0]).join("")}
                     </span>
                   </div>
                   <div>
