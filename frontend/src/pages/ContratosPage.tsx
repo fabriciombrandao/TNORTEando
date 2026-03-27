@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, RefreshCw, Package, AlertCircle, XCircle, AlertTriangle, Loader2 } from "lucide-react";
+import { ArrowLeft, RefreshCw, Package, AlertCircle, XCircle, Loader2 } from "lucide-react";
 import api from "../services/api";
 
 const getCliente   = (id: string) => api.get(`/api/v1/clientes/${id}`).then(r => r.data);
@@ -42,51 +42,57 @@ function BadgeStatus({ status }: { status: string }) {
 }
 
 function ItemRow({ item }: { item: any }) {
-  const cancelado  = item.cancelado;
+  const cancelado  = item.cancelado || item.trocado;
   const programado = item.programado;
-  const trocado    = item.trocado;
   const gratuito   = item.gratuito;
-  const inativo    = cancelado || trocado;
+
+  // Cor de fundo da linha baseada no status
+  const bgClass = cancelado  ? "bg-red-50/60 border-red-100" :
+                  programado ? "bg-amber-50/60 border-amber-100" :
+                  gratuito   ? "bg-blue-50/60 border-blue-100" :
+                               "bg-emerald-50/30 border-slate-50";
+
+  // Cor do ponto indicador
+  const dotColor = cancelado  ? "bg-red-400" :
+                   programado ? "bg-amber-400" :
+                   gratuito   ? "bg-blue-400" :
+                                "bg-emerald-400";
+
+  // Cor do valor total
+  const valColor = cancelado  ? "text-red-400" :
+                   programado ? "text-amber-600" :
+                   gratuito   ? "text-blue-500" :
+                   item.recorrente ? "text-emerald-600" : "text-slate-500";
 
   return (
-    <div className={`grid grid-cols-[1fr_36px_64px_72px] gap-1 text-xs items-start px-4 py-2 border-b border-slate-50 last:border-0 ${
-      inativo ? "opacity-50 bg-slate-50/50" : programado ? "bg-amber-50/30" : ""
-    }`}>
+    <div className={`grid grid-cols-[8px_1fr_36px_64px_72px] gap-1 text-xs items-start px-3 py-2 border-b last:border-0 ${bgClass}`}>
+      {/* Indicador de cor */}
+      <div className="flex items-center justify-center pt-1.5">
+        <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotColor}`} />
+      </div>
+
+      {/* Produto + código */}
       <div>
-        <p className={`font-medium leading-tight ${inativo ? "line-through text-slate-400" : "text-slate-800"}`}>
+        <p className={`font-medium leading-tight ${cancelado ? "line-through text-slate-400" : "text-slate-800"}`}>
           {item.descricao_produto}
         </p>
-        {item.codigo_produto && (
-          <p className="text-slate-400 font-mono text-xs mt-0.5">{item.codigo_produto}</p>
-        )}
-        {cancelado && (
-          <span className="inline-flex items-center gap-0.5 text-xs text-red-500 font-medium mt-0.5">
-            <XCircle className="w-3 h-3" /> Cancelado
-          </span>
-        )}
-        {trocado && !cancelado && (
-          <span className="text-xs text-slate-400 font-medium mt-0.5 block">Trocado</span>
-        )}
-        {programado && !cancelado && (
-          <span className="inline-flex items-center gap-0.5 text-xs text-amber-600 font-medium mt-0.5">
-            <AlertTriangle className="w-3 h-3" />
-            Aviso prévio{item.fim_aviso_previo ? ` até ${item.fim_aviso_previo}` : ""}
-          </span>
-        )}
-        {gratuito && !cancelado && !trocado && (
-          <span className="text-xs text-emerald-500 font-medium mt-0.5 block">Gratuito</span>
-        )}
+        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+          {item.codigo_produto && (
+            <span className="text-slate-400 font-mono">{item.codigo_produto}</span>
+          )}
+          {programado && !cancelado && (
+            <span className="text-amber-600 font-medium">
+              aviso prévio{item.fim_aviso_previo ? ` até ${item.fim_aviso_previo}` : ""}
+            </span>
+          )}
+        </div>
       </div>
+
       <p className="text-slate-400 text-center pt-0.5">{item.quantidade}</p>
       <p className="text-slate-400 text-right pt-0.5">
         {item.valor_unitario > 0 ? formatBRL(item.valor_unitario) : "—"}
       </p>
-      <p className={`font-semibold text-right pt-0.5 ${
-        inativo    ? "text-slate-300" :
-        programado ? "text-amber-600" :
-        gratuito   ? "text-emerald-400" :
-        item.recorrente ? "text-emerald-600" : "text-slate-500"
-      }`}>
+      <p className={`font-semibold text-right pt-0.5 ${valColor}`}>
         {formatBRL(item.valor_total)}
       </p>
     </div>
