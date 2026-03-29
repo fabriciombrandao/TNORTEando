@@ -3,12 +3,13 @@ import { useMutation } from "@tanstack/react-query";
 import api from "../services/api";
 import toast from "react-hot-toast";
 import {
-  Upload, FileText, CheckCircle, AlertTriangle,
+  Upload, FileText, CheckCircle, AlertTriangle, Trash2,
   Users, Building2, MapPin, ArrowRight, Loader2,
   XCircle, RefreshCw, ChevronDown, ChevronUp, Search
 } from "lucide-react";
 
 // ── API ───────────────────────────────────────────────────────────────────────
+const limparDados = () => api.post("/api/v1/importacao/limpar").then(r => r.data);
 const analisarCSV  = (file: File) => { const f = new FormData(); f.append("file", file); return api.post("/api/v1/importacao/analisar", f).then(r => r.data); };
 const importarCSV  = (payload: {file: File; selecao: any}) => {
   const f = new FormData();
@@ -71,6 +72,13 @@ export default function ImportacaoPage() {
   const [analise, setAnalise]   = useState<Analise | null>(null);
   const [resultado, setResultado] = useState<Resultado | null>(null);
   const [etapa, setEtapa]       = useState<"selecao"|"analise"|"importando"|"concluido">("selecao");
+  const [confirmLimpar, setConfirmLimpar] = useState(false);
+
+  const mutLimpar = useMutation({
+    mutationFn: limparDados,
+    onSuccess: () => { toast.success("Dados limpos!"); setConfirmLimpar(false); resetar(); },
+    onError: () => toast.error("Erro ao limpar dados."),
+  });
   const [busca, setBusca]       = useState("");
 
   // Seleções
@@ -163,10 +171,44 @@ export default function ImportacaoPage() {
 
   return (
     <div className="p-4 md:p-6 max-w-3xl animate-fade-in">
-      <div className="mb-5">
-        <h1 className="text-xl font-bold text-slate-900">Importação de Contratos</h1>
-        <p className="text-sm text-slate-500 mt-1">Selecione o CSV do TOTVS. O sistema analisa antes de importar — você pode revisar e desmarcar registros.</p>
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <h1 className="text-xl font-bold text-slate-900">Importação de Contratos</h1>
+          <p className="text-sm text-slate-500 mt-1">Selecione o CSV do TOTVS. O sistema analisa antes de importar.</p>
+        </div>
+        <button onClick={() => setConfirmLimpar(true)}
+          className="flex items-center gap-2 px-3 py-2 rounded-xl border border-red-200 bg-red-50 text-red-600 text-xs font-semibold hover:bg-red-100 transition-colors flex-shrink-0">
+          <Trash2 className="w-3.5 h-3.5" /> Limpar dados
+        </button>
       </div>
+
+      {/* Modal confirmar limpeza */}
+      {confirmLimpar && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+             onClick={() => setConfirmLimpar(false)}>
+          <div className="w-full max-w-sm bg-white rounded-2xl p-5 shadow-xl"
+               onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+                <Trash2 className="w-5 h-5 text-red-600" />
+              </div>
+              <div>
+                <p className="font-bold text-slate-900">Limpar todos os dados?</p>
+                <p className="text-xs text-slate-500 mt-0.5">Clientes, contratos, propostas e itens serão removidos.</p>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-4">
+              <button onClick={() => setConfirmLimpar(false)}
+                className="btn-secondary btn-md flex-1">Cancelar</button>
+              <button onClick={() => mutLimpar.mutate()}
+                disabled={mutLimpar.isPending}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700">
+                {mutLimpar.isPending ? <><Loader2 className="w-4 h-4 animate-spin" /> Limpando...</> : "Confirmar limpeza"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── ETAPA 1: Seleção ── */}
       <div className="card mb-4">

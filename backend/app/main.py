@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
@@ -1102,6 +1102,7 @@ async def importar_csv(
         raise
     except Exception as e:
         await db.rollback()
+        import traceback; open("/app/logs/import_error.txt","w").write(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Erro na importação: {str(e)}")
     finally:
         os.unlink(tmp_path)
@@ -1388,7 +1389,7 @@ async def salvar_parametros(
 @router.post("/importacao/csv-selecionado", tags=["importacao"])
 async def importar_csv_selecionado(
     file: UploadFile = File(...),
-    selecao: str = "",
+    selecao: str = Form(""),
     current_user: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1443,8 +1444,33 @@ async def importar_csv_selecionado(
         def _val(v):
             import re as _re
             if not v or v.strip() in ("","-"): return 0.0
-            try: return float(_re.sub(r"[^0-9,]","",v.strip()).replace(",",".") or 0)
-            except: return 0.0
+            try:
+                s = v.strip()
+                # Remover qualquer caractere que nao seja digito, ponto ou virgula
+                s = _re.sub(r"[^0-9.,]","",s)
+                if not s: return 0.0
+                if "," in s and "." in s:
+                    # Formato: 1.000,00 ou 1,000.00
+                    if s.index(",") > s.index("."):
+                        # Virgula e decimal: 1.000,00
+                        s = s.replace(".","").replace(",",".")
+                    else:
+                        # Ponto e decimal: 1,000.00
+                        s = s.replace(",","")
+                elif "," in s:
+                    # So virgula: pode ser decimal BR (1,5) ou milhar (1,000)
+                    parts = s.split(",")
+                    if len(parts[-1]) == 3 and len(parts) == 2:
+                        s = s.replace(",","")  # milhar
+                    else:
+                        s = s.replace(",",".")  # decimal
+                elif s.count(".") > 1:
+                    # Multiplos pontos: 1.000.00
+                    parts = s.split(".")
+                    s = "".join(parts[:-1]) + "." + parts[-1]
+                return float(s or 0)
+            except:
+                import sys; print(f"_val ERRO: {repr(v)}", file=sys.stderr); return 0.0
         def _data(s):
             if not s or s.strip() in ("-",""): return None
             try:
@@ -1657,7 +1683,7 @@ async def importar_csv_selecionado(
                    "sc":_nulo(row.get("Status Cancelamento","")),
                    "si":row.get("Status do Contrato","").strip().upper(),
                    "di":_data(row.get("Data de Assinatura do Item","")) or data_ass_cont,
-                   "apm": int(float(row.get("Período do Aviso Prévio","0").replace(",",".") or 0)),
+                   "apm": int(_val(row.get("Período do Aviso Prévio","0"))),
                    "iap": _mes_ano(row.get("Início Aviso Prévio","")),
                    "fap": _mes_ano(row.get("Final do Aviso Prévio (Cancelamento)",""))})
 
@@ -1742,6 +1768,7 @@ async def importar_csv_selecionado(
     except HTTPException: raise
     except Exception as e:
         await db.rollback()
+        import traceback; open("/app/logs/import_error.txt","w").write(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Erro na importação: {str(e)}")
     finally:
         os.unlink(tmp_path)
@@ -1756,7 +1783,7 @@ async def criar_usuario(
     from sqlalchemy import text as sqlt
     from app.core.security import get_password_hash
 
-    if current_user.papel not in (PapelUsuario.ADMIN, PapelUsuario.GESTOR_EMPRESA):
+    if current_user.papel not in ("ADMIN", PapelUsuario.GESTOR_EMPRESA):
         raise HTTPException(status_code=403, detail="Apenas administradores podem criar usuários.")
 
     email = body.get("email","").strip().lower()
@@ -1789,5 +1816,21 @@ async def criar_usuario(
     })
     await db.commit()
     return {"id": uid, "mensagem": "Usuário criado com sucesso."}
+
+
+@router.post("/importacao/limpar", tags=["importacao"])
+async def limpar_dados(
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if current_user.papel not in (PapelUsuario.GESTOR_EMPRESA, "ADMIN"):
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+    from sqlalchemy import text as sqlt
+    await db.execute(sqlt("""
+        TRUNCATE TABLE itens_contrato, propostas_contrato, contratos, clientes
+        RESTART IDENTITY CASCADE
+    """))
+    await db.commit()
+    return {"ok": True, "mensagem": "Dados limpos com sucesso."}
 
 app.include_router(router)
