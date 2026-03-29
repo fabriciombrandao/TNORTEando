@@ -19,7 +19,7 @@ const NAV_ITEMS = [
   },
   {
     to: "/agenda", label: "Agenda", icon: CalendarDays,
-    papeis: ["ESN"],
+    papeis: ["ESN", "CS"],
     mobileNav: true,
   },
   {
@@ -34,7 +34,7 @@ const NAV_ITEMS = [
   },
   {
     to: "/clientes", label: "Clientes", icon: Users,
-    papeis: ["ADMIN", "GESTOR_CONSOLIDADORA", "GESTOR_EMPRESA", "DSN", "GSN", "ESN"],
+    papeis: ["ADMIN", "GESTOR_CONSOLIDADORA", "GESTOR_EMPRESA", "DSN", "GSN", "CS", "ESN"],
     mobileNav: true,
   },
   {
@@ -57,6 +57,7 @@ const NAV_ITEMS = [
 const PAPEL_LABEL: Record<string, string> = {
   ADMIN: "Administrador",
   GESTOR_CONSOLIDADORA: "Gestor Consolidadora",
+  CS: "CS",
   GESTOR_EMPRESA: "Gestor",
   DSN: "Diretor",
   GSN: "Gerente",

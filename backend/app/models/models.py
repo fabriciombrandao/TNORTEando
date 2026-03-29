@@ -23,6 +23,7 @@ class PapelUsuario(str, PyEnum):
     GESTOR_EMPRESA       = "GESTOR_EMPRESA"
     DSN                  = "DSN"
     GSN                  = "GSN"
+    CS                   = "CS"
     ESN                  = "ESN"
 
 class StatusCliente(str, PyEnum):
@@ -58,6 +59,12 @@ class StatusVisita(str, PyEnum):
     EM_ANDAMENTO = "EM_ANDAMENTO"
     CONCLUIDA    = "CONCLUIDA"
     CANCELADA    = "CANCELADA"
+
+class TipoRelatorio(str, PyEnum):
+    ROTINA       = "ROTINA"
+    PROBLEMA     = "PROBLEMA"
+    OPORTUNIDADE = "OPORTUNIDADE"
+    SUPORTE      = "SUPORTE"
 
 class TipoVisita(str, PyEnum):
     PRESENCIAL = "PRESENCIAL"
@@ -234,6 +241,14 @@ class Visita(Base):
     observacoes              = Column(Text, nullable=True)
     motivo_cancelamento      = Column(Text, nullable=True)
     proxima_visita_prevista  = Column(Date, nullable=True)
+    # Relatório de visita
+    relatorio_tipo           = Column(String(20), nullable=True)
+    relatorio_resumo         = Column(Text, nullable=True)
+    relatorio_problema       = Column(Boolean, default=False)
+    relatorio_problema_desc  = Column(Text, nullable=True)
+    relatorio_oportunidade   = Column(Boolean, default=False)
+    relatorio_oport_desc     = Column(Text, nullable=True)
+    relatorio_proximo_passo  = Column(Text, nullable=True)
     criado_em                = Column(DateTime(timezone=True), server_default=func.now())
     vendedor    = relationship("Usuario",    back_populates="visitas")
     cliente     = relationship("Cliente",    back_populates="visitas")

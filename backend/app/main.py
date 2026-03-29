@@ -571,6 +571,13 @@ class CheckoutRequest(BaseModel):
     lat: float
     lng: float
     observacoes: Optional[str] = None
+    relatorio_tipo: Optional[str] = None
+    relatorio_resumo: Optional[str] = None
+    relatorio_problema: bool = False
+    relatorio_problema_desc: Optional[str] = None
+    relatorio_oportunidade: bool = False
+    relatorio_oport_desc: Optional[str] = None
+    relatorio_proximo_passo: Optional[str] = None
 
 @router.post("/visitas/checkin", tags=["visitas"])
 async def checkin(
@@ -595,12 +602,46 @@ async def checkout(
     current_user: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # Validar campos obrigatórios do relatório
+    if not body.relatorio_tipo:
+        raise HTTPException(status_code=400, detail="Tipo do relatório é obrigatório.")
+    if not body.relatorio_resumo or len(body.relatorio_resumo.strip()) < 10:
+        raise HTTPException(status_code=400, detail="Resumo da visita é obrigatório (mínimo 10 caracteres).")
+    if body.relatorio_problema and not body.relatorio_problema_desc:
+        raise HTTPException(status_code=400, detail="Descreva o problema identificado.")
+    if body.relatorio_oportunidade and not body.relatorio_oport_desc:
+        raise HTTPException(status_code=400, detail="Descreva a oportunidade identificada.")
     try:
         from app.services.visita_service import VisitaService
+        from sqlalchemy import text as sqlt
         visita = await VisitaService.checkout(
             db, visita_id, current_user.id,
             body.lat, body.lng, body.observacoes
         )
+        # Salvar relatório
+        await db.execute(sqlt("""
+            UPDATE visitas SET
+                relatorio_tipo           = :tipo,
+                relatorio_resumo         = :resumo,
+                relatorio_problema       = :prob,
+                relatorio_problema_desc  = :prob_desc,
+                relatorio_oportunidade   = :oport,
+                relatorio_oport_desc     = :oport_desc,
+                relatorio_proximo_passo  = :proximo,
+                proxima_visita_prevista  = :proxima_data
+            WHERE id = :id
+        """), {
+            "tipo": body.relatorio_tipo,
+            "resumo": body.relatorio_resumo,
+            "prob": body.relatorio_problema,
+            "prob_desc": body.relatorio_problema_desc,
+            "oport": body.relatorio_oportunidade,
+            "oport_desc": body.relatorio_oport_desc,
+            "proximo": body.relatorio_proximo_passo,
+            "proxima_data": None,
+            "id": str(visita_id),
+        })
+        await db.commit()
         return {
             "visita_id": str(visita.id),
             "checkout_em": visita.checkout_em,
@@ -675,27 +716,143 @@ async def criar_agenda_otimizada(
 
 @router.get("/agenda/hoje", tags=["agenda"])
 async def agenda_hoje(
+    vendedor_id: Optional[str] = None,
     current_user: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     from app.services.agenda_service import AgendaService
-    agenda = await AgendaService.buscar_agenda_do_dia(db, current_user.id, date.today())
+    from sqlalchemy import text as sqlt
+    papel = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+
+    # CS pode ver agenda de qualquer ESN sob seu GSN
+    if papel == "CS" and vendedor_id:
+        uid = UUID(vendedor_id)
+    else:
+        uid = current_user.id
+
+    agenda = await AgendaService.buscar_agenda_do_dia(db, uid, date.today())
     if not agenda:
         return {"agenda": None}
+
+    # Buscar nome dos clientes
+    cliente_ids = [str(i.cliente_id) for i in agenda.itens]
+    clientes = {}
+    if cliente_ids:
+        res = await db.execute(sqlt(
+            f"SELECT id, razao_social, municipio FROM clientes WHERE id IN ({','.join([chr(39)+c+chr(39) for c in cliente_ids])})"
+        ))
+        for row in res.fetchall():
+            clientes[str(row[0])] = {"razao_social": row[1], "municipio": row[2]}
+
     return {
         "agenda_id": str(agenda.id),
         "data": agenda.data,
-        "itens": [
-            {
-                "id": str(i.id),
-                "cliente_id": str(i.cliente_id),
-                "ordem": i.ordem,
-                "horario_previsto": i.horario_previsto,
-                "status": i.status,
-            }
-            for i in agenda.itens
-        ],
+        "agenda": {
+            "itens": [
+                {
+                    "id": str(i.id),
+                    "cliente_id": str(i.cliente_id),
+                    "razao_social": clientes.get(str(i.cliente_id), {}).get("razao_social", ""),
+                    "municipio": clientes.get(str(i.cliente_id), {}).get("municipio", ""),
+                    "ordem": i.ordem,
+                    "horario_previsto": i.horario_previsto,
+                    "status": i.status,
+                }
+                for i in agenda.itens
+            ]
+        }
     }
+
+
+@router.get("/agenda/esns", tags=["agenda"])
+async def listar_esns_do_cs(
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """CS lista os ESNs sob seu GSN para gerenciar agendas."""
+    from sqlalchemy import text as sqlt
+    papel = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+    if papel not in ("CS", "GSN", "GESTOR_EMPRESA", "ADMIN"):
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+
+    # Buscar GSN do CS (superior imediato)
+    res_gsn = await db.execute(sqlt(
+        "SELECT superior_id FROM hierarquia_vendas WHERE subordinado_id = :id LIMIT 1"
+    ), {"id": str(current_user.id)})
+    gsn_row = res_gsn.fetchone()
+    gsn_id = str(gsn_row[0]) if gsn_row else str(current_user.id)
+
+    # Buscar ESNs sob o GSN
+    res = await db.execute(sqlt("""
+        SELECT u.id, u.nome, u.codigo_externo, u.email
+        FROM usuarios u
+        JOIN hierarquia_vendas hv ON hv.subordinado_id = u.id
+        WHERE hv.superior_id = :gsn_id AND u.papel = 'ESN' AND u.ativo = true
+        ORDER BY u.nome
+    """), {"gsn_id": gsn_id})
+    return [{"id": str(r[0]), "nome": r[1], "codigo_externo": r[2], "email": r[3]} for r in res.fetchall()]
+
+
+@router.get("/visitas/historico", tags=["visitas"])
+async def historico_visitas(
+    vendedor_id: Optional[str] = None,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Histórico de visitas — ESN vê as suas, CS/GSN veem de seus ESNs."""
+    from sqlalchemy import text as sqlt
+    papel = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+
+    if papel == "ESN":
+        where = "WHERE v.vendedor_id = :uid AND v.status != 'EM_ANDAMENTO'"
+        params = {"uid": str(current_user.id)}
+    elif vendedor_id:
+        where = "WHERE v.vendedor_id = :uid AND v.status != 'EM_ANDAMENTO'"
+        params = {"uid": vendedor_id}
+    else:
+        where = "WHERE v.status != 'EM_ANDAMENTO'"
+        params = {}
+
+    res = await db.execute(sqlt(f"""
+        SELECT v.id, v.checkin_em, v.checkout_em, v.status,
+               c.razao_social, c.municipio,
+               u.nome as vendedor_nome,
+               v.relatorio_tipo, v.relatorio_resumo,
+               v.relatorio_problema, v.relatorio_problema_desc,
+               v.relatorio_oportunidade, v.relatorio_oport_desc,
+               v.relatorio_proximo_passo, v.proxima_visita_prevista,
+               v.distancia_checkin_metros
+        FROM visitas v
+        JOIN clientes c ON c.id = v.cliente_id
+        JOIN usuarios u ON u.id = v.vendedor_id
+        {where}
+        ORDER BY v.checkin_em DESC
+        LIMIT 100
+    """), params)
+
+    rows = res.fetchall()
+    return [
+        {
+            "id": str(r[0]),
+            "checkin_em": str(r[1]) if r[1] else None,
+            "checkout_em": str(r[2]) if r[2] else None,
+            "status": r[3],
+            "cliente": r[4],
+            "municipio": r[5],
+            "vendedor": r[6],
+            "relatorio_tipo": r[7],
+            "relatorio_resumo": r[8],
+            "relatorio_problema": bool(r[9]),
+            "relatorio_problema_desc": r[10],
+            "relatorio_oportunidade": bool(r[11]),
+            "relatorio_oport_desc": r[12],
+            "relatorio_proximo_passo": r[13],
+            "proxima_visita_prevista": str(r[14]) if r[14] else None,
+            "distancia_metros": r[15],
+            "duracao_minutos": int((r[2]-r[1]).total_seconds()/60) if r[1] and r[2] else None,
+        }
+        for r in rows
+    ]
 
 # ─────────────────────────────────────────────
 # Importação CSV

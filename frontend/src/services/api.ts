@@ -59,7 +59,18 @@ export const checkin = (payload: {
 
 export const checkout = (
   visita_id: string,
-  payload: { lat: number; lng: number; observacoes?: string }
+  payload: {
+    lat: number;
+    lng: number;
+    observacoes?: string;
+    relatorio_tipo?: string;
+    relatorio_resumo?: string;
+    relatorio_problema?: boolean;
+    relatorio_problema_desc?: string;
+    relatorio_oportunidade?: boolean;
+    relatorio_oport_desc?: string;
+    relatorio_proximo_passo?: string;
+  }
 ) => api.post(`/api/v1/visitas/${visita_id}/checkout`, payload).then((r) => r.data);
 
 // ── Importação ────────────────────────────────
