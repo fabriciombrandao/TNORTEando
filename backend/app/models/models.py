@@ -18,10 +18,12 @@ class Base(DeclarativeBase):
 
 
 class PapelUsuario(str, PyEnum):
-    GESTOR_EMPRESA = "GESTOR_EMPRESA"
-    DSN            = "DSN"
-    GSN            = "GSN"
-    ESN            = "ESN"
+    ADMIN                = "ADMIN"
+    GESTOR_CONSOLIDADORA = "GESTOR_CONSOLIDADORA"
+    GESTOR_EMPRESA       = "GESTOR_EMPRESA"
+    DSN                  = "DSN"
+    GSN                  = "GSN"
+    ESN                  = "ESN"
 
 class StatusCliente(str, PyEnum):
     ATIVO    = "ATIVO"

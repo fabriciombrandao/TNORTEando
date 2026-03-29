@@ -78,7 +78,7 @@ async def login(form: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = 
     return TokenResponse(
         access_token=create_access_token(str(user.id)),
         refresh_token=create_refresh_token(str(user.id)),
-        usuario={"id": str(user.id), "nome": user.nome, "papel": user.papel, "email": user.email},
+        usuario={"id": str(user.id), "nome": user.nome, "papel": user.papel, "email": user.email, "codigo_externo": user.codigo_externo},
     )
 
 @router.get("/auth/me", tags=["auth"])
@@ -109,30 +109,114 @@ async def listar_usuarios(
     current_user: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(Usuario).where(Usuario.ativo == True).order_by(Usuario.nome)
+    from sqlalchemy import text as sqlt
+    where = []
+    params = {}
     if papel:
-        try:
-            papel_enum = PapelUsuario(papel.upper())
-            stmt = stmt.where(Usuario.papel == papel_enum)
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Papel inválido: {papel}")
-    result = await db.execute(stmt)
-    usuarios = result.scalars().all()
+        where.append("papel = :papel")
+        params["papel"] = papel.upper()
+    where_sql = "WHERE " + " AND ".join(where) if where else ""
+    res = await db.execute(sqlt(f"""
+        SELECT id, codigo_externo, nome, email, papel, telefone, ativo
+        FROM usuarios
+        {where_sql}
+        ORDER BY nome
+    """), params)
+    rows = res.fetchall()
     return [
         {
-            "id": str(u.id),
-            "codigo_externo": u.codigo_externo,
-            "nome": u.nome,
-            "email": u.email,
-            "papel": u.papel,
-            "telefone": u.telefone,
-            "ativo": u.ativo,
+            "id": str(r[0]),
+            "codigo_externo": r[1],
+            "nome": r[2],
+            "email": r[3],
+            "papel": r[4],
+            "telefone": r[5],
+            "ativo": bool(r[6]),
         }
-        for u in usuarios
+        for r in rows
     ]
 
+@router.put("/usuarios/{usuario_id}", tags=["usuarios"])
+async def editar_usuario(
+    usuario_id: UUID,
+    body: dict,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if current_user.papel not in ("ADMIN", "GESTOR_CONSOLIDADORA", "GESTOR_EMPRESA"):
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+    from sqlalchemy import text as sqlt
+    updates = []
+    params = {"id": str(usuario_id)}
+    if "nome" in body:
+        updates.append("nome = :nome"); params["nome"] = body["nome"]
+    if "email" in body:
+        updates.append("email = :email"); params["email"] = body["email"]
+    if "codigo_externo" in body:
+        updates.append("codigo_externo = :codigo_externo"); params["codigo_externo"] = body["codigo_externo"]
+    if "telefone" in body:
+        updates.append("telefone = :telefone"); params["telefone"] = body["telefone"]
+    if "papel" in body:
+        updates.append("papel = :papel"); params["papel"] = body["papel"]
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nenhum campo para atualizar.")
+    await db.execute(sqlt(f"UPDATE usuarios SET {', '.join(updates)} WHERE id = :id"), params)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/usuarios/{usuario_id}/redefinir-senha", tags=["usuarios"])
+async def redefinir_senha(
+    usuario_id: UUID,
+    body: dict,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if current_user.papel not in ("ADMIN", "GESTOR_CONSOLIDADORA", "GESTOR_EMPRESA"):
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+    from sqlalchemy import text as sqlt
+    from app.core.security import get_password_hash
+    nova_senha = body.get("senha", "")
+    if len(nova_senha) < 6:
+        raise HTTPException(status_code=400, detail="Senha deve ter ao menos 6 caracteres.")
+    hashed = get_password_hash(nova_senha)
+    await db.execute(sqlt("UPDATE usuarios SET senha_hash = :h WHERE id = :id"),
+        {"h": hashed, "id": str(usuario_id)})
+    await db.commit()
+    return {"ok": True}
+
+
+@router.patch("/usuarios/{usuario_id}/ativo", tags=["usuarios"])
+async def toggle_usuario_ativo(
+    usuario_id: UUID,
+    body: dict,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if current_user.papel not in ("ADMIN", "GESTOR_CONSOLIDADORA", "GESTOR_EMPRESA"):
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+    from sqlalchemy import text as sqlt
+    ativo = bool(body.get("ativo", True))
+    await db.execute(sqlt("UPDATE usuarios SET ativo = :a WHERE id = :id"),
+        {"a": ativo, "id": str(usuario_id)})
+    await db.commit()
+    return {"ok": True, "ativo": ativo}
+
+
 @router.get("/usuarios/me", tags=["usuarios"])
-async def meu_perfil(current_user: Usuario = Depends(get_current_user)):
+async def meu_perfil(
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import text as sqlt
+    org = None
+    if current_user.organizacao_id:
+        res = await db.execute(sqlt(
+            "SELECT codigo_externo, nome FROM organizacoes WHERE id = :id"),
+            {"id": str(current_user.organizacao_id)})
+        row = res.fetchone()
+        if row:
+            org = {"codigo": row[0], "nome": row[1]}
     return {
         "id": str(current_user.id),
         "codigo_externo": current_user.codigo_externo,
@@ -141,6 +225,7 @@ async def meu_perfil(current_user: Usuario = Depends(get_current_user)):
         "papel": current_user.papel,
         "telefone": current_user.telefone,
         "ativo": current_user.ativo,
+        "organizacao": org,
     }
 
 # ─────────────────────────────────────────────
@@ -162,9 +247,29 @@ async def listar_clientes(
     where = ["c.ativo = true"] if apenas_ativos else []
     params = {}
 
-    if current_user.papel == PapelUsuario.ESN:
+    papel = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+    if papel == "ESN":
+        # ESN vê apenas seus próprios clientes
         where.append("c.vendedor_responsavel_id = :esn_id")
         params["esn_id"] = str(current_user.id)
+    elif papel == "GSN":
+        # GSN vê clientes dos ESNs sob ele
+        where.append("""c.vendedor_responsavel_id IN (
+            SELECT hv.subordinado_id FROM hierarquia_vendas hv
+            WHERE hv.superior_id = :gsn_id
+        )""")
+        params["gsn_id"] = str(current_user.id)
+    elif papel == "DSN":
+        # DSN vê clientes dos ESNs sob seus GSNs
+        where.append("""c.vendedor_responsavel_id IN (
+            SELECT hv2.subordinado_id FROM hierarquia_vendas hv2
+            WHERE hv2.superior_id IN (
+                SELECT hv1.subordinado_id FROM hierarquia_vendas hv1
+                WHERE hv1.superior_id = :dsn_id
+            )
+        )""")
+        params["dsn_id"] = str(current_user.id)
+    # ADMIN, GESTOR_EMPRESA, GESTOR_CONSOLIDADORA veem todos
     if filtro == "pendentes":
         where.append("c.status_atribuicao = 'PENDENTE'")
     elif filtro == "atribuidos":
@@ -250,16 +355,40 @@ async def estatisticas_clientes(
     current_user: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(Cliente).where(Cliente.ativo == True)
-    if current_user.papel == PapelUsuario.ESN:
-        stmt = stmt.where(Cliente.vendedor_responsavel_id == current_user.id)
-    result = await db.execute(stmt)
-    todos = result.scalars().all()
-    from app.models.models import StatusAtribuicao
+    from sqlalchemy import text as sqlt
+    papel = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+    uid = str(current_user.id)
+
+    if papel == "ESN":
+        where = "WHERE c.ativo = true AND c.vendedor_responsavel_id = :uid"
+        params = {"uid": uid}
+    elif papel == "GSN":
+        where = """WHERE c.ativo = true AND c.vendedor_responsavel_id IN (
+            SELECT hv.subordinado_id FROM hierarquia_vendas hv WHERE hv.superior_id = :uid)"""
+        params = {"uid": uid}
+    elif papel == "DSN":
+        where = """WHERE c.ativo = true AND c.vendedor_responsavel_id IN (
+            SELECT hv2.subordinado_id FROM hierarquia_vendas hv2
+            WHERE hv2.superior_id IN (
+                SELECT hv1.subordinado_id FROM hierarquia_vendas hv1 WHERE hv1.superior_id = :uid
+            ))"""
+        params = {"uid": uid}
+    else:
+        where = "WHERE c.ativo = true"
+        params = {}
+
+    res = await db.execute(sqlt(f"""
+        SELECT
+            COUNT(*) as total,
+            SUM(CASE WHEN c.status_atribuicao = 'ATRIBUIDO' THEN 1 ELSE 0 END) as atribuidos,
+            SUM(CASE WHEN c.status_atribuicao = 'PENDENTE' THEN 1 ELSE 0 END) as pendentes
+        FROM clientes c {where}
+    """), params)
+    row = res.fetchone()
     return {
-        "total": len(todos),
-        "atribuidos": sum(1 for c in todos if c.status_atribuicao == StatusAtribuicao.ATRIBUIDO),
-        "pendentes": sum(1 for c in todos if c.status_atribuicao == StatusAtribuicao.PENDENTE),
+        "total": int(row[0] or 0),
+        "atribuidos": int(row[1] or 0),
+        "pendentes": int(row[2] or 0),
     }
 
 @router.get("/clientes/{cliente_id}", tags=["clientes"])
@@ -825,7 +954,9 @@ async def importar_csv(
             await db.execute(sqlt("""
                 INSERT INTO usuarios (id,organizacao_id,codigo_externo,nome,email,senha_hash,papel,telefone,ativo,primeiro_acesso)
                 VALUES (:i,:o,:c,:n,:e,:h,:p,:t,true,true)
-                ON CONFLICT (email) DO NOTHING
+                ON CONFLICT (email) DO UPDATE SET
+                    telefone = COALESCE(EXCLUDED.telefone, usuarios.telefone),
+                    nome = COALESCE(EXCLUDED.nome, usuarios.nome)
             """), {
                 "i": uid, "o": org_id, "c": cod,
                 "n": _norm(nome) or cod,
@@ -1518,7 +1649,7 @@ async def importar_csv_selecionado(
             uid = str(uuid_mod.uuid4())
             await db.execute(sqlt("""
                 INSERT INTO usuarios (id,organizacao_id,codigo_externo,nome,email,senha_hash,papel,telefone,ativo,primeiro_acesso)
-                VALUES (:i,:o,:c,:n,:e,:h,:p,:t,true,true) ON CONFLICT (email) DO NOTHING
+                VALUES (:i,:o,:c,:n,:e,:h,:p,:t,true,true) ON CONFLICT (email) DO UPDATE SET telefone = COALESCE(EXCLUDED.telefone, usuarios.telefone), nome = COALESCE(EXCLUDED.nome, usuarios.nome)
             """), {"i":uid,"o":org_id,"c":cod,"n":_norm(nome) or cod,"e":email_n,"h":_h("Mudar@123"),"p":papel,"t":_fone(ddd,tel)})
             res_check = await db.execute(sqlt("SELECT id FROM usuarios WHERE email=:e"), {"e": email_n})
             row_check = res_check.fetchone()

@@ -33,11 +33,18 @@ function DashboardPlaceholder() {
     <div className="p-6 animate-fade-in">
       <div className="mb-6">
         <h1 className="text-xl font-bold text-slate-900">
-          Olá, {usuario?.nome?.split(" ")[0]} 👋
+          {(() => {
+            const partes = (usuario?.nome || "").split(" ").filter(Boolean);
+            const nomecompleto = partes.length >= 2 ? `${partes[0]} ${partes[partes.length-1]}` : partes[0] || "";
+            const papelLabel: Record<string,string> = {
+              ADMIN:"Admin", GESTOR_CONSOLIDADORA:"Gestor Consolidadora",
+              GESTOR_EMPRESA:"Gestor", DSN:"DSN", GSN:"GSN", ESN:"ESN"
+            };
+            const p = papelLabel[usuario?.papel || ""] || usuario?.papel || "";
+            const cod = usuario?.codigo_externo ? ` · ${usuario.codigo_externo}` : "";
+            return `Olá, ${p}${cod} · ${nomecompleto} 👋`;
+          })()}
         </h1>
-        <p className="text-slate-500 text-sm mt-1">
-          {isESN ? "Veja sua agenda e faça seus check-ins hoje." : "Acompanhe a carteira e o desempenho da equipe."}
-        </p>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {isESN ? (
@@ -115,6 +122,7 @@ export default function App() {
             <Route path="clientes/:id/licenciamento" element={<LicenciamentoPage />} />
             <Route path="clientes/:id/contratos" element={<ContratosPage />} />
             <Route path="importacao"    element={<ImportacaoPage />} />
+            <Route path="usuarios"      element={<UsuariosPage />} />
             <Route path="configuracoes" element={<ConfiguracoesPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

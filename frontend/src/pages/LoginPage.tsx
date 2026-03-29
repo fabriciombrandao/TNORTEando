@@ -112,10 +112,7 @@ export default function LoginPage() {
           </form>
         </div>
 
-        <p className="text-center text-slate-400 text-xs mt-6">
-          Primeiro acesso? Senha padrão:{" "}
-          <span className="text-slate-600 font-medium">Mudar@123</span>
-        </p>
+
 
       </div>
     </div>
