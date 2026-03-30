@@ -27,6 +27,20 @@ function compartilharContato(c: any) {
   window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, "_blank");
 }
 
+function mascaraTelefone(valor: string): string {
+  const nums = valor.replace(/\D/g, "").slice(0, 11);
+  if (nums.length <= 10) {
+    // Fixo: (XX) XXXX-XXXX
+    return nums
+      .replace(/(\d{2})(\d)/, "($1) $2")
+      .replace(/(\d{4})(\d)/, "$1-$2");
+  }
+  // Celular: (XX) 9XXXX-XXXX
+  return nums
+    .replace(/(\d{2})(\d)/, "($1) $2")
+    .replace(/(\d{5})(\d)/, "$1-$2");
+}
+
 function foneWA(tel: string) {
   return tel.replace(/\D/g, "");
 }
@@ -138,7 +152,7 @@ function FormContato({ clienteId, item, onSave, onClose }: { clienteId: string; 
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="label mb-1.5 block">Telefone</label>
-          <input value={telefone} onChange={e => setTelefone(e.target.value)} className="input" placeholder="(63) 9 9999-0000" />
+          <input value={telefone} onChange={e => setTelefone(mascaraTelefone(e.target.value))} className="input" placeholder="(63) 98112-8888" maxLength={15} />
         </div>
         <div>
           <label className="label mb-1.5 block">E-mail</label>
