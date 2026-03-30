@@ -3,7 +3,7 @@ import { useAuthStore } from "../../store/auth";
 import {
   LayoutDashboard, MapPin, CalendarDays, Users,
   UploadCloud, LogOut, CheckSquare, Settings,
-  Menu, X, ChevronRight, KeyRound, Eye, EyeOff, ShieldAlert, BookOpen, BookOpen
+  Menu, X, ChevronRight, KeyRound, Eye, EyeOff, ShieldAlert, BookOpen
 } from "lucide-react";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";

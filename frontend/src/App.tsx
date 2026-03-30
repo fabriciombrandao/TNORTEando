@@ -19,7 +19,6 @@ import RedefinirSenhaPage from "./pages/RedefinirSenhaPage";
 import EsqueciSenhaPage from "./pages/EsqueciSenhaPage";
 import AuditoriaPage from "./pages/AuditoriaPage";
 import CadastrosPage from "./pages/CadastrosPage";
-import CadastrosPage from "./pages/CadastrosPage";
 
 const qc = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
