@@ -146,7 +146,7 @@ export default function ClienteDetalhe() {
         </button>
 
         {/* Contatos */}
-        <button
+        <button onClick={() => navigate(`/clientes/${id}/contatos`)}
           className="w-full flex items-center gap-3 px-4 py-3.5 border-b border-slate-50 hover:bg-slate-50 transition-colors text-left">
           <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center flex-shrink-0">
             <Users className="w-5 h-5 text-purple-600" />

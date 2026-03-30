@@ -1586,6 +1586,188 @@ async def excluir_cadastro(
 
 
 # ─────────────────────────────────────────────
+# Contatos de Clientes
+# ─────────────────────────────────────────────
+
+@router.get("/clientes/{cliente_id}/contatos", tags=["contatos"])
+async def listar_contatos_cliente(
+    cliente_id: UUID,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import text as sqlt
+    res = await db.execute(sqlt("""
+        SELECT c.id, c.nome, c.cargo, c.telefone, c.email, c.observacoes,
+               cc.departamento, cc.tipo, cc.principal, cc.ativo, cc.id as vinculo_id
+        FROM contatos c
+        JOIN contatos_clientes cc ON cc.contato_id = c.id
+        WHERE cc.cliente_id = :cid AND cc.ativo = true
+        ORDER BY cc.principal DESC, c.nome
+    """), {"cid": str(cliente_id)})
+    rows = res.fetchall()
+    return [
+        {
+            "id": str(r[0]), "nome": r[1], "cargo": r[2],
+            "telefone": r[3], "email": r[4], "observacoes": r[5],
+            "departamento": r[6], "tipo": r[7],
+            "principal": bool(r[8]), "ativo": bool(r[9]),
+            "vinculo_id": str(r[10]),
+        }
+        for r in rows
+    ]
+
+
+@router.post("/clientes/{cliente_id}/contatos", tags=["contatos"])
+async def criar_contato_cliente(
+    cliente_id: UUID,
+    body: dict,
+    request: Request = None,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import text as sqlt
+    import uuid as uuid_mod
+    nome = body.get("nome", "").strip()
+    if not nome:
+        raise HTTPException(status_code=400, detail="Nome é obrigatório.")
+
+    # Verificar se é vínculo de contato existente
+    contato_id = body.get("contato_id")
+    if not contato_id:
+        # Criar novo contato
+        contato_id = str(uuid_mod.uuid4())
+        await db.execute(sqlt("""
+            INSERT INTO contatos (id, nome, cargo, telefone, email, observacoes)
+            VALUES (:id, :nome, :cargo, :tel, :email, :obs)
+        """), {
+            "id": contato_id, "nome": nome,
+            "cargo": body.get("cargo", ""),
+            "tel": body.get("telefone", "") or None,
+            "email": body.get("email", "") or None,
+            "obs": body.get("observacoes", "") or None,
+        })
+
+    # Criar vínculo
+    vinculo_id = str(uuid_mod.uuid4())
+    await db.execute(sqlt("""
+        INSERT INTO contatos_clientes (id, contato_id, cliente_id, departamento, tipo, principal)
+        VALUES (:id, :cid, :clid, :dept, :tipo, :principal)
+        ON CONFLICT (contato_id, cliente_id) DO UPDATE SET
+            departamento = EXCLUDED.departamento,
+            tipo = EXCLUDED.tipo,
+            principal = EXCLUDED.principal,
+            ativo = true
+    """), {
+        "id": vinculo_id, "cid": contato_id, "clid": str(cliente_id),
+        "dept": body.get("departamento") or None,
+        "tipo": body.get("tipo", "OUTRO"),
+        "principal": bool(body.get("principal", False)),
+    })
+
+    # Se marcado como principal, desmarcar outros
+    if body.get("principal"):
+        await db.execute(sqlt("""
+            UPDATE contatos_clientes SET principal = false
+            WHERE cliente_id = :clid AND contato_id != :cid
+        """), {"clid": str(cliente_id), "cid": contato_id})
+
+    await db.commit()
+    await registrar_audit(db, "CREATE",
+        usuario_id=str(current_user.id), usuario_nome=current_user.nome, usuario_email=current_user.email,
+        entidade="contatos", entidade_id=contato_id,
+        descricao=f"Contato criado/vinculado: {nome} ao cliente {cliente_id}",
+        valor_novo={"nome": nome, "departamento": body.get("departamento"), "tipo": body.get("tipo")},
+        ip=request.client.host if request else None,
+    )
+    return {"id": contato_id, "vinculo_id": vinculo_id, "mensagem": "Contato criado com sucesso."}
+
+
+@router.put("/clientes/{cliente_id}/contatos/{contato_id}", tags=["contatos"])
+async def editar_contato_cliente(
+    cliente_id: UUID,
+    contato_id: UUID,
+    body: dict,
+    request: Request = None,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import text as sqlt
+    # Atualizar dados do contato
+    updates_c = []
+    params_c = {"id": str(contato_id)}
+    if "nome" in body:        updates_c.append("nome = :nome");        params_c["nome"]  = body["nome"]
+    if "cargo" in body:       updates_c.append("cargo = :cargo");      params_c["cargo"] = body["cargo"]
+    if "telefone" in body:    updates_c.append("telefone = :tel");     params_c["tel"]   = body["telefone"] or None
+    if "email" in body:       updates_c.append("email = :email");      params_c["email"] = body["email"] or None
+    if "observacoes" in body: updates_c.append("observacoes = :obs");  params_c["obs"]   = body["observacoes"] or None
+    if updates_c:
+        await db.execute(sqlt(f"UPDATE contatos SET {', '.join(updates_c)} WHERE id = :id"), params_c)
+
+    # Atualizar vínculo
+    updates_v = []
+    params_v = {"cid": str(contato_id), "clid": str(cliente_id)}
+    if "departamento" in body: updates_v.append("departamento = :dept");      params_v["dept"]      = body["departamento"] or None
+    if "tipo" in body:         updates_v.append("tipo = :tipo");              params_v["tipo"]      = body["tipo"]
+    if "principal" in body:    updates_v.append("principal = :principal");    params_v["principal"] = bool(body["principal"])
+    if updates_v:
+        await db.execute(sqlt(f"UPDATE contatos_clientes SET {', '.join(updates_v)} WHERE contato_id = :cid AND cliente_id = :clid"), params_v)
+        if body.get("principal"):
+            await db.execute(sqlt("UPDATE contatos_clientes SET principal = false WHERE cliente_id = :clid AND contato_id != :cid"), params_v)
+
+    await db.commit()
+    await registrar_audit(db, "UPDATE",
+        usuario_id=str(current_user.id), usuario_nome=current_user.nome, usuario_email=current_user.email,
+        entidade="contatos", entidade_id=str(contato_id),
+        descricao=f"Contato atualizado: {body.get('nome', str(contato_id))}",
+        valor_novo=body,
+        ip=request.client.host if request else None,
+    )
+    return {"ok": True}
+
+
+@router.delete("/clientes/{cliente_id}/contatos/{contato_id}", tags=["contatos"])
+async def remover_contato_cliente(
+    cliente_id: UUID,
+    contato_id: UUID,
+    request: Request = None,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import text as sqlt
+    await db.execute(sqlt("""
+        UPDATE contatos_clientes SET ativo = false
+        WHERE contato_id = :cid AND cliente_id = :clid
+    """), {"cid": str(contato_id), "clid": str(cliente_id)})
+    await db.commit()
+    await registrar_audit(db, "DELETE",
+        usuario_id=str(current_user.id), usuario_nome=current_user.nome, usuario_email=current_user.email,
+        entidade="contatos", entidade_id=str(contato_id),
+        descricao=f"Contato desvinculado do cliente {cliente_id}",
+        ip=request.client.host if request else None,
+    )
+    return {"ok": True}
+
+
+@router.get("/contatos/buscar", tags=["contatos"])
+async def buscar_contatos(
+    q: str = "",
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Busca contatos globais para vincular a um cliente."""
+    from sqlalchemy import text as sqlt
+    if len(q) < 2:
+        return []
+    res = await db.execute(sqlt("""
+        SELECT id, nome, cargo, email, telefone FROM contatos
+        WHERE nome ILIKE :q OR email ILIKE :q
+        ORDER BY nome LIMIT 10
+    """), {"q": f"%{q}%"})
+    rows = res.fetchall()
+    return [{"id": str(r[0]), "nome": r[1], "cargo": r[2], "email": r[3], "telefone": r[4]} for r in rows]
+
+
+# ─────────────────────────────────────────────
 # Importação CSV
 # ─────────────────────────────────────────────
 

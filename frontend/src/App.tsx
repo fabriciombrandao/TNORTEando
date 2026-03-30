@@ -19,6 +19,7 @@ import RedefinirSenhaPage from "./pages/RedefinirSenhaPage";
 import EsqueciSenhaPage from "./pages/EsqueciSenhaPage";
 import AuditoriaPage from "./pages/AuditoriaPage";
 import CadastrosPage from "./pages/CadastrosPage";
+import ContatosClientePage from "./pages/ContatosClientePage";
 
 const qc = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -138,7 +139,9 @@ export default function App() {
             <Route path="usuarios"      element={<UsuariosPage />} />
             <Route path="auditoria"    element={<AuditoriaPage />} />
             <Route path="cadastros"    element={<CadastrosPage />} />
+            <Route path="clientes/:id/contatos" element={<ContatosClientePage />} />
             <Route path="cadastros"    element={<CadastrosPage />} />
+            <Route path="clientes/:id/contatos" element={<ContatosClientePage />} />
             <Route path="configuracoes" element={<ConfiguracoesPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
