@@ -145,6 +145,19 @@ export default function ClienteDetalhe() {
           <ChevronRight className="w-4 h-4 text-slate-300 flex-shrink-0" />
         </button>
 
+        {/* Contatos */}
+        <button
+          className="w-full flex items-center gap-3 px-4 py-3.5 border-b border-slate-50 hover:bg-slate-50 transition-colors text-left">
+          <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center flex-shrink-0">
+            <Users className="w-5 h-5 text-purple-600" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-slate-900">Contatos</p>
+            <p className="text-xs text-slate-400 mt-0.5">Decisores, técnicos, financeiros</p>
+          </div>
+          <ChevronRight className="w-4 h-4 text-slate-300 flex-shrink-0" />
+        </button>
+
         {/* Histórico de visitas */}
         <button onClick={() => navigate(`/clientes/${id}/visitas`)}
           className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-slate-50 transition-colors text-left">
@@ -196,18 +209,6 @@ export default function ClienteDetalhe() {
                 <p className="label">Vendas realizadas</p>
                 <p className="text-sm font-semibold text-purple-600">{totalPropostas} proposta{totalPropostas !== 1 ? "s" : ""}</p>
               </div>
-            </div>
-          </div>
-
-          {/* Contatos */}
-          <div className="card">
-            <div className="card-header flex items-center justify-between">
-              <span className="font-semibold text-slate-900 text-sm">Contatos</span>
-              <button className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">+ Adicionar</button>
-            </div>
-            <div className="card-body text-center py-5">
-              <p className="text-slate-400 text-sm">Nenhum contato cadastrado.</p>
-              <p className="text-slate-300 text-xs mt-1">Decisores, técnicos, financeiros.</p>
             </div>
           </div>
 
