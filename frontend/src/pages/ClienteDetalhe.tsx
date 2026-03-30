@@ -153,7 +153,11 @@ export default function ClienteDetalhe() {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-slate-900">Contatos</p>
-            <p className="text-xs text-slate-400 mt-0.5">Decisores, técnicos, financeiros</p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {(contatos as any[]).length > 0
+                ? `${(contatos as any[]).length} contato${(contatos as any[]).length !== 1 ? "s" : ""} cadastrado${(contatos as any[]).length !== 1 ? "s" : ""}`
+                : "Nenhum contato cadastrado"}
+            </p>
           </div>
           <ChevronRight className="w-4 h-4 text-slate-300 flex-shrink-0" />
         </button>

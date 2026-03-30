@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../services/api";
 import toast from "react-hot-toast";
-import { ArrowLeft, Plus, Pencil, Trash2, X, Check, Search, Star, Phone, Mail, MessageCircle } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, Trash2, X, Check, Search, Star, Phone, Mail, MessageCircle, Share2 } from "lucide-react";
 
 const listarContatos  = (id: string) => api.get(`/api/v1/clientes/${id}/contatos`).then(r => r.data);
 const criarContato    = (id: string, body: any) => api.post(`/api/v1/clientes/${id}/contatos`, body).then(r => r.data);
@@ -12,6 +12,20 @@ const removerContato  = (cliId: string, conId: string) => api.delete(`/api/v1/cl
 const buscarContatos  = (q: string) => api.get(`/api/v1/contatos/buscar`, { params: { q } }).then(r => r.data);
 const listarDepts     = () => api.get(`/api/v1/cadastros/departamentos`).then(r => r.data);
 const listarTipos     = () => api.get(`/api/v1/cadastros/tipos_contato`).then(r => r.data);
+
+function compartilharContato(c: any) {
+  const linhas = [];
+  linhas.push(`*${c.nome}*`);
+  if (c.cargo || c.departamento) {
+    linhas.push([c.cargo, c.departamento].filter(Boolean).join(" · "));
+  }
+  if (c.tipo) linhas.push(`Tipo: ${c.tipo}`);
+  if (c.telefone) linhas.push(`📱 ${c.telefone}`);
+  if (c.email) linhas.push(`✉️ ${c.email}`);
+  if (c.observacoes) linhas.push(`📝 ${c.observacoes}`);
+  const texto = linhas.join("\n");
+  window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, "_blank");
+}
 
 function foneWA(tel: string) {
   return tel.replace(/\D/g, "");
@@ -256,6 +270,10 @@ export default function ContatosClientePage() {
                   )}
                 </div>
                 <div className="flex gap-1 flex-shrink-0">
+                  <button onClick={() => compartilharContato(c)} title="Compartilhar no WhatsApp"
+                    className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:bg-green-50 hover:text-green-600">
+                    <Share2 className="w-3.5 h-3.5" />
+                  </button>
                   <button onClick={() => { setEditando(c); setModal("editar"); }}
                     className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-indigo-600">
                     <Pencil className="w-3.5 h-3.5" />
