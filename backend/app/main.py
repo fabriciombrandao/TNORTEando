@@ -396,7 +396,7 @@ async def listar_usuarios(
         params["papel"] = papel.upper()
     where_sql = "WHERE " + " AND ".join(where) if where else ""
     res = await db.execute(sqlt(f"""
-        SELECT id, codigo_externo, nome, email, papel, telefone, ativo
+        SELECT id, codigo_externo, nome, email, papel, telefone, ativo, primeiro_acesso
         FROM usuarios
         {where_sql}
         ORDER BY nome
@@ -411,6 +411,7 @@ async def listar_usuarios(
             "papel": r[4],
             "telefone": r[5],
             "ativo": bool(r[6]),
+            "primeiro_acesso": bool(r[7]) if r[7] is not None else False,
         }
         for r in rows
     ]
