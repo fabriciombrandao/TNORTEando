@@ -79,14 +79,16 @@ function Modal({ titulo, onClose, children }: any) {
 function FormCadastro({ secao, item, onSave, onClose }: any) {
   const [nome, setNome] = useState(item?.nome || "");
   const [icone, setIcone] = useState(item?.icone || "📋");
-  const [data, setData] = useState(item?.data || "");
+  const [dia, setDia] = useState(item?.dia || "");
+  const [mes, setMes] = useState(item?.mes || "");
+  const [ano, setAno] = useState(item?.ano || "");
   const [uf, setUf] = useState(item?.uf || "");
   const [municipio, setMunicipio] = useState(item?.municipio || "");
   const [tipo, setTipo] = useState(item?.tipo || "MUNICIPAL");
 
   const body: any = { nome };
   if (secao.temIcone) body.icone = icone;
-  if (secao.isFeriado) { body.data = data; body.uf = uf || null; body.municipio = municipio || null; body.tipo = tipo; }
+  if (secao.isFeriado) { body.dia = dia; body.mes = mes; body.ano = ano || null; body.uf = uf || null; body.municipio = municipio || null; body.tipo = tipo; }
 
   return (
     <div className="space-y-3">
@@ -118,17 +120,33 @@ function FormCadastro({ secao, item, onSave, onClose }: any) {
             <input value={nome} onChange={e => setNome(e.target.value)}
               className="input" placeholder="Nome do feriado..." autoFocus />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="label mb-1 block">Data</label>
-              <input type="date" value={data} onChange={e => setData(e.target.value)} className="input" />
+              <label className="label mb-1 block">Dia</label>
+              <input type="number" min="1" max="31" value={dia} onChange={e => setDia(e.target.value)}
+                className="input" placeholder="20" />
             </div>
+            <div>
+              <label className="label mb-1 block">Mês</label>
+              <select value={mes} onChange={e => setMes(e.target.value)} className="input">
+                <option value="">Mês</option>
+                {["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"].map((m,i) => (
+                  <option key={i+1} value={i+1}>{m}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label mb-1 block">Ano (opcional)</label>
+              <input type="number" min="2024" max="2100" value={ano} onChange={e => setAno(e.target.value)}
+                className="input" placeholder="Todos" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label mb-1 block">UF (vazio = nacional)</label>
               <input value={uf} onChange={e => setUf(e.target.value.toUpperCase())}
                 className="input" placeholder="TO" maxLength={2} />
             </div>
-          </div>
           <div>
             <label className="label mb-1 block">Município (opcional)</label>
             <input value={municipio} onChange={e => setMunicipio(e.target.value)}
@@ -235,7 +253,7 @@ function SecaoCadastro({ secao }: { secao: typeof SECOES[0] }) {
                       <p className="text-sm font-medium text-slate-800">{item.nome}</p>
                       {secao.isFeriado && (
                         <p className="text-xs text-slate-400">
-                          {item.data ? item.data.split("-").reverse().join("/") : ""} {item.uf ? `· ${item.uf}` : "· Nacional"} {item.municipio ? `· ${item.municipio}` : ""} · {item.tipo}
+                          {item.dia}/{item.mes}{item.ano ? `/${item.ano}` : ""} {item.uf ? `· ${item.uf}` : "· Nacional"} {item.municipio ? `· ${item.municipio}` : ""}
                         </p>
                       )}
                     </div>

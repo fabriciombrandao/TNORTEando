@@ -1421,12 +1421,12 @@ async def listar_cadastro(
     
     if entidade == "feriados":
         res = await db.execute(sqlt(f"""
-            SELECT id, nome, data, uf, municipio, tipo, ativo, criado_em
-            FROM {tabela} {where} ORDER BY data DESC
+            SELECT id, nome, dia, mes, ano, uf, municipio, tipo, ativo
+            FROM {tabela} {where} ORDER BY mes, dia
         """))
         rows = res.fetchall()
-        return [{"id": str(r[0]), "nome": r[1], "data": str(r[2]), "uf": r[3],
-                 "municipio": r[4], "tipo": r[5], "ativo": bool(r[6])} for r in rows]
+        return [{"id": str(r[0]), "nome": r[1], "dia": r[2], "mes": r[3], "ano": r[4],
+                 "uf": r[5], "municipio": r[6], "tipo": r[7], "ativo": bool(r[8])} for r in rows]
     
     cols = "id, nome, ativo, ordem"
     if entidade == "tipos_resultado_visita":
@@ -1463,16 +1463,15 @@ async def criar_cadastro(
         raise HTTPException(status_code=400, detail="Nome é obrigatório.")
     
     if entidade == "feriados":
-        from datetime import date as date_type
-        data_str = body.get("data", "")
-        try:
-            data_obj = date_type.fromisoformat(data_str) if data_str else None
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Data inválida. Use o formato YYYY-MM-DD.")
+        dia = body.get("dia")
+        mes = body.get("mes")
+        if not dia or not mes:
+            raise HTTPException(status_code=400, detail="Dia e mês são obrigatórios.")
         await db.execute(sqlt(f"""
-            INSERT INTO {tabela} (id, nome, descricao, data, uf, municipio, tipo)
-            VALUES (:id, :nome, :descricao, :data, :uf, :municipio, :tipo)
-        """), {"id": uid, "nome": nome, "descricao": nome, "data": data_obj,
+            INSERT INTO {tabela} (id, nome, descricao, dia, mes, ano, uf, municipio, tipo)
+            VALUES (:id, :nome, :descricao, :dia, :mes, :ano, :uf, :municipio, :tipo)
+        """), {"id": uid, "nome": nome, "descricao": nome,
+               "dia": int(dia), "mes": int(mes), "ano": body.get("ano") or None,
                "uf": body.get("uf") or None, "municipio": body.get("municipio") or None,
                "tipo": body.get("tipo", "MUNICIPAL")})
     else:
@@ -1530,9 +1529,11 @@ async def editar_cadastro(
     if "icone" in body and entidade == "tipos_resultado_visita":
         updates.append("icone = :icone"); params["icone"] = body["icone"]
     if entidade == "feriados":
-        if "data" in body: updates.append("data = :data"); params["data"] = body["data"]
-        if "uf" in body: updates.append("uf = :uf"); params["uf"] = body["uf"]
-        if "municipio" in body: updates.append("municipio = :municipio"); params["municipio"] = body["municipio"]
+        if "dia" in body: updates.append("dia = :dia"); params["dia"] = int(body["dia"])
+        if "mes" in body: updates.append("mes = :mes"); params["mes"] = int(body["mes"])
+        if "ano" in body: updates.append("ano = :ano"); params["ano"] = body["ano"] or None
+        if "uf" in body: updates.append("uf = :uf"); params["uf"] = body["uf"] or None
+        if "municipio" in body: updates.append("municipio = :municipio"); params["municipio"] = body["municipio"] or None
         if "tipo" in body: updates.append("tipo = :tipo"); params["tipo"] = body["tipo"]
     if not updates:
         raise HTTPException(status_code=400, detail="Nenhum campo para atualizar.")
