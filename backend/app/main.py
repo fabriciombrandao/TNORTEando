@@ -1463,11 +1463,17 @@ async def criar_cadastro(
         raise HTTPException(status_code=400, detail="Nome é obrigatório.")
     
     if entidade == "feriados":
+        from datetime import date as date_type
+        data_str = body.get("data", "")
+        try:
+            data_obj = date_type.fromisoformat(data_str) if data_str else None
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Data inválida. Use o formato YYYY-MM-DD.")
         await db.execute(sqlt(f"""
-            INSERT INTO {tabela} (id, nome, data, uf, municipio, tipo)
-            VALUES (:id, :nome, :data, :uf, :municipio, :tipo)
-        """), {"id": uid, "nome": nome, "data": body.get("data"),
-               "uf": body.get("uf"), "municipio": body.get("municipio"),
+            INSERT INTO {tabela} (id, nome, descricao, data, uf, municipio, tipo)
+            VALUES (:id, :nome, :descricao, :data, :uf, :municipio, :tipo)
+        """), {"id": uid, "nome": nome, "descricao": nome, "data": data_obj,
+               "uf": body.get("uf") or None, "municipio": body.get("municipio") or None,
                "tipo": body.get("tipo", "MUNICIPAL")})
     else:
         icone_col = ", icone" if entidade == "tipos_resultado_visita" else ""

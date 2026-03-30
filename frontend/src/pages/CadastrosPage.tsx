@@ -235,7 +235,7 @@ function SecaoCadastro({ secao }: { secao: typeof SECOES[0] }) {
                       <p className="text-sm font-medium text-slate-800">{item.nome}</p>
                       {secao.isFeriado && (
                         <p className="text-xs text-slate-400">
-                          {item.data} {item.uf ? `· ${item.uf}` : "· Nacional"} {item.municipio ? `· ${item.municipio}` : ""} · {item.tipo}
+                          {item.data ? item.data.split("-").reverse().join("/") : ""} {item.uf ? `· ${item.uf}` : "· Nacional"} {item.municipio ? `· ${item.municipio}` : ""} · {item.tipo}
                         </p>
                       )}
                     </div>
