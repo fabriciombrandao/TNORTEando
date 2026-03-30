@@ -53,11 +53,6 @@ const NAV_ITEMS = [
     mobileNav: false,
   },
   {
-    to: "/cadastros", label: "Cadastros", icon: BookOpen,
-    papeis: ["ADMIN", "GESTOR_EMPRESA", "CS"],
-    mobileNav: false,
-  },
-  {
     to: "/auditoria", label: "Auditoria", icon: ShieldAlert,
     papeis: ["ADMIN"],
     mobileNav: false,
