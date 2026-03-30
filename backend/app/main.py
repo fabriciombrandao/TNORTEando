@@ -423,6 +423,7 @@ async def listar_usuarios(
 async def editar_usuario(
     usuario_id: UUID,
     body: dict,
+    request: Request = None,
     current_user: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
