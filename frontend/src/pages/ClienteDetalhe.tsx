@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import api from "../services/api";
 import {
   ArrowLeft, Building2, MapPin, User,
-  FileText, Clock, FileSearch2, ShoppingBag, ChevronRight
+  FileText, Clock, FileSearch2, ShoppingBag, ChevronRight, Users
 } from "lucide-react";
 
 const getCliente  = (id: string) => api.get(`/api/v1/clientes/${id}`).then(r => r.data);
