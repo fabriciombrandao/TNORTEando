@@ -3,7 +3,7 @@ import { useAuthStore } from "../../store/auth";
 import {
   LayoutDashboard, MapPin, CalendarDays, Users,
   UploadCloud, LogOut, CheckSquare, Settings,
-  Menu, X, ChevronRight, KeyRound, Eye, EyeOff, ShieldAlert
+  Menu, X, ChevronRight, KeyRound, Eye, EyeOff, ShieldAlert, BookOpen, BookOpen
 } from "lucide-react";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -45,6 +45,16 @@ const NAV_ITEMS = [
   {
     to: "/usuarios", label: "Usuários", icon: Users,
     papeis: ["ADMIN", "GESTOR_CONSOLIDADORA", "GESTOR_EMPRESA"],
+    mobileNav: false,
+  },
+  {
+    to: "/cadastros", label: "Cadastros", icon: BookOpen,
+    papeis: ["ADMIN", "GESTOR_EMPRESA", "CS"],
+    mobileNav: false,
+  },
+  {
+    to: "/cadastros", label: "Cadastros", icon: BookOpen,
+    papeis: ["ADMIN", "GESTOR_EMPRESA", "CS"],
     mobileNav: false,
   },
   {

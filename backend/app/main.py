@@ -1389,6 +1389,322 @@ async def listar_feriados(
 
 
 # ─────────────────────────────────────────────
+# Cadastros Auxiliares
+# ─────────────────────────────────────────────
+
+CADASTROS = {
+    "objetivos-visita":       "objetivos_visita",
+    "tipos-resultado":        "tipos_resultado_visita",
+    "acoes-proximo-passo":    "acoes_proximo_passo",
+    "departamentos-contato":  "departamentos_contato",
+    "justificativas-agenda":  "justificativas_agenda",
+    "motivos-cancelamento":   "motivos_cancelamento",
+}
+
+@router.get("/cadastros/{tipo}", tags=["cadastros"])
+async def listar_cadastro(
+    tipo: str,
+    apenas_ativos: bool = True,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import text as sqlt
+    tabela = CADASTROS.get(tipo)
+    if not tabela:
+        raise HTTPException(status_code=404, detail="Tipo de cadastro não encontrado.")
+    where = "WHERE ativo = true" if apenas_ativos else ""
+    res = await db.execute(sqlt(f"SELECT id, nome, descricao, ativo, ordem FROM {tabela} {where} ORDER BY ordem, nome"))
+    rows = res.fetchall()
+    return [{"id": str(r[0]), "nome": r[1], "descricao": r[2], "ativo": bool(r[3]), "ordem": r[4]} for r in rows]
+
+
+@router.post("/cadastros/{tipo}", tags=["cadastros"])
+async def criar_cadastro(
+    tipo: str,
+    body: dict,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import text as sqlt
+    papel = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+    if papel not in ("ADMIN", "GESTOR_EMPRESA", "CS"):
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+    tabela = CADASTROS.get(tipo)
+    if not tabela:
+        raise HTTPException(status_code=404, detail="Tipo de cadastro não encontrado.")
+    nome = body.get("nome", "").strip()
+    if not nome:
+        raise HTTPException(status_code=400, detail="Nome é obrigatório.")
+    import uuid as _uuid
+    uid = str(_uuid.uuid4())
+    await db.execute(sqlt(f"""
+        INSERT INTO {tabela} (id, nome, descricao, ativo, ordem)
+        VALUES (:id, :nome, :desc, true, :ordem)
+    """), {"id": uid, "nome": nome, "desc": body.get("descricao",""), "ordem": body.get("ordem", 0)})
+    await db.commit()
+    await registrar_audit(db, "CREATE",
+        usuario_id=str(current_user.id), usuario_nome=current_user.nome, usuario_email=current_user.email,
+        entidade=tabela, entidade_id=uid,
+        descricao=f"Cadastro criado: {nome}",
+        valor_novo={"nome": nome},
+    )
+    return {"id": uid, "ok": True}
+
+
+@router.put("/cadastros/{tipo}/{item_id}", tags=["cadastros"])
+async def editar_cadastro(
+    tipo: str,
+    item_id: str,
+    body: dict,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import text as sqlt
+    papel = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+    if papel not in ("ADMIN", "GESTOR_EMPRESA", "CS"):
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+    tabela = CADASTROS.get(tipo)
+    if not tabela:
+        raise HTTPException(status_code=404, detail="Tipo de cadastro não encontrado.")
+    updates = []
+    params = {"id": item_id}
+    if "nome" in body:
+        updates.append("nome = :nome"); params["nome"] = body["nome"]
+    if "descricao" in body:
+        updates.append("descricao = :descricao"); params["descricao"] = body["descricao"]
+    if "ativo" in body:
+        updates.append("ativo = :ativo"); params["ativo"] = bool(body["ativo"])
+    if "ordem" in body:
+        updates.append("ordem = :ordem"); params["ordem"] = int(body["ordem"])
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nenhum campo para atualizar.")
+    await db.execute(sqlt(f"UPDATE {tabela} SET {', '.join(updates)} WHERE id = :id"), params)
+    await db.commit()
+    await registrar_audit(db, "UPDATE",
+        usuario_id=str(current_user.id), usuario_nome=current_user.nome, usuario_email=current_user.email,
+        entidade=tabela, entidade_id=item_id,
+        descricao=f"Cadastro atualizado: {body.get('nome',item_id)}",
+        valor_novo=body,
+    )
+    return {"ok": True}
+
+
+@router.delete("/cadastros/{tipo}/{item_id}", tags=["cadastros"])
+async def excluir_cadastro(
+    tipo: str,
+    item_id: str,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import text as sqlt
+    papel = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+    if papel not in ("ADMIN", "GESTOR_EMPRESA"):
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+    tabela = CADASTROS.get(tipo)
+    if not tabela:
+        raise HTTPException(status_code=404, detail="Tipo de cadastro não encontrado.")
+    # Soft delete — desativar em vez de excluir
+    await db.execute(sqlt(f"UPDATE {tabela} SET ativo = false WHERE id = :id"), {"id": item_id})
+    await db.commit()
+    await registrar_audit(db, "DELETE",
+        usuario_id=str(current_user.id), usuario_nome=current_user.nome, usuario_email=current_user.email,
+        entidade=tabela, entidade_id=item_id,
+        descricao=f"Cadastro desativado.",
+    )
+    return {"ok": True}
+
+
+# ─────────────────────────────────────────────
+# Cadastros Auxiliares
+# ─────────────────────────────────────────────
+
+CADASTROS_CONFIG = {
+    "objetivos_visita":          {"tabela": "objetivos_visita",          "nome": "Objetivo de visita"},
+    "tipos_resultado_visita":    {"tabela": "tipos_resultado_visita",     "nome": "Tipo de resultado"},
+    "acoes_proximo_passo":       {"tabela": "acoes_proximo_passo",        "nome": "Ação de próximo passo"},
+    "departamentos":             {"tabela": "departamentos",              "nome": "Departamento"},
+    "tipos_contato":             {"tabela": "tipos_contato",              "nome": "Tipo de contato"},
+    "justificativas_agenda":     {"tabela": "justificativas_agenda",      "nome": "Justificativa de agenda"},
+    "motivos_cancelamento":      {"tabela": "motivos_cancelamento",       "nome": "Motivo de cancelamento"},
+    "feriados":                  {"tabela": "feriados",                   "nome": "Feriado"},
+}
+
+PAPEIS_CADASTROS = ("ADMIN", "GESTOR_EMPRESA", "CS")
+
+
+@router.get("/cadastros/{entidade}", tags=["cadastros"])
+async def listar_cadastro(
+    entidade: str,
+    apenas_ativos: bool = True,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if entidade not in CADASTROS_CONFIG:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado.")
+    from sqlalchemy import text as sqlt
+    tabela = CADASTROS_CONFIG[entidade]["tabela"]
+    where = "WHERE ativo = true" if apenas_ativos else ""
+    
+    if entidade == "feriados":
+        res = await db.execute(sqlt(f"""
+            SELECT id, nome, data, uf, municipio, tipo, ativo, criado_em
+            FROM {tabela} {where} ORDER BY data DESC
+        """))
+        rows = res.fetchall()
+        return [{"id": str(r[0]), "nome": r[1], "data": str(r[2]), "uf": r[3],
+                 "municipio": r[4], "tipo": r[5], "ativo": bool(r[6])} for r in rows]
+    
+    cols = "id, nome, ativo, ordem"
+    if entidade == "tipos_resultado_visita":
+        cols = "id, nome, icone, ativo, ordem"
+    
+    res = await db.execute(sqlt(f"SELECT {cols} FROM {tabela} {where} ORDER BY ordem, nome"))
+    rows = res.fetchall()
+    
+    if entidade == "tipos_resultado_visita":
+        return [{"id": str(r[0]), "nome": r[1], "icone": r[2], "ativo": bool(r[3]), "ordem": r[4]} for r in rows]
+    return [{"id": str(r[0]), "nome": r[1], "ativo": bool(r[2]), "ordem": r[3]} for r in rows]
+
+
+@router.post("/cadastros/{entidade}", tags=["cadastros"])
+async def criar_cadastro(
+    entidade: str,
+    body: dict,
+    request: Request = None,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    papel = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+    if papel not in PAPEIS_CADASTROS:
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+    if entidade not in CADASTROS_CONFIG:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado.")
+    from sqlalchemy import text as sqlt
+    import uuid as uuid_mod
+    tabela = CADASTROS_CONFIG[entidade]["tabela"]
+    nome_entidade = CADASTROS_CONFIG[entidade]["nome"]
+    uid = str(uuid_mod.uuid4())
+    nome = body.get("nome", "").strip()
+    if not nome:
+        raise HTTPException(status_code=400, detail="Nome é obrigatório.")
+    
+    if entidade == "feriados":
+        await db.execute(sqlt(f"""
+            INSERT INTO {tabela} (id, nome, data, uf, municipio, tipo)
+            VALUES (:id, :nome, :data, :uf, :municipio, :tipo)
+        """), {"id": uid, "nome": nome, "data": body.get("data"),
+               "uf": body.get("uf"), "municipio": body.get("municipio"),
+               "tipo": body.get("tipo", "MUNICIPAL")})
+    else:
+        icone_col = ", icone" if entidade == "tipos_resultado_visita" else ""
+        icone_val = ", :icone" if entidade == "tipos_resultado_visita" else ""
+        params = {"id": uid, "nome": nome, "ordem": body.get("ordem", 0)}
+        if entidade == "tipos_resultado_visita":
+            params["icone"] = body.get("icone", "📋")
+        await db.execute(sqlt(f"""
+            INSERT INTO {tabela} (id, nome{icone_col}, ordem)
+            VALUES (:id, :nome{icone_val}, :ordem)
+        """), params)
+    
+    await db.commit()
+    await registrar_audit(db, "CREATE",
+        usuario_id=str(current_user.id), usuario_nome=current_user.nome, usuario_email=current_user.email,
+        entidade=entidade, entidade_id=uid,
+        descricao=f"{nome_entidade} criado: {nome}",
+        valor_novo=body,
+        ip=request.client.host if request else None,
+    )
+    return {"id": uid, "mensagem": f"{nome_entidade} criado com sucesso."}
+
+
+@router.put("/cadastros/{entidade}/{item_id}", tags=["cadastros"])
+async def editar_cadastro(
+    entidade: str,
+    item_id: UUID,
+    body: dict,
+    request: Request = None,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    papel = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+    if papel not in PAPEIS_CADASTROS:
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+    if entidade not in CADASTROS_CONFIG:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado.")
+    from sqlalchemy import text as sqlt
+    tabela = CADASTROS_CONFIG[entidade]["tabela"]
+    nome_entidade = CADASTROS_CONFIG[entidade]["nome"]
+
+    # Capturar antes
+    res = await db.execute(sqlt(f"SELECT nome FROM {tabela} WHERE id = :id"), {"id": str(item_id)})
+    row = res.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Registro não encontrado.")
+    antes = {"nome": row[0]}
+
+    updates = []
+    params = {"id": str(item_id)}
+    if "nome" in body: updates.append("nome = :nome"); params["nome"] = body["nome"]
+    if "ordem" in body: updates.append("ordem = :ordem"); params["ordem"] = body["ordem"]
+    if "ativo" in body: updates.append("ativo = :ativo"); params["ativo"] = body["ativo"]
+    if "icone" in body and entidade == "tipos_resultado_visita":
+        updates.append("icone = :icone"); params["icone"] = body["icone"]
+    if entidade == "feriados":
+        if "data" in body: updates.append("data = :data"); params["data"] = body["data"]
+        if "uf" in body: updates.append("uf = :uf"); params["uf"] = body["uf"]
+        if "municipio" in body: updates.append("municipio = :municipio"); params["municipio"] = body["municipio"]
+        if "tipo" in body: updates.append("tipo = :tipo"); params["tipo"] = body["tipo"]
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nenhum campo para atualizar.")
+    
+    await db.execute(sqlt(f"UPDATE {tabela} SET {', '.join(updates)} WHERE id = :id"), params)
+    await db.commit()
+    await registrar_audit(db, "UPDATE",
+        usuario_id=str(current_user.id), usuario_nome=current_user.nome, usuario_email=current_user.email,
+        entidade=entidade, entidade_id=str(item_id),
+        descricao=f"{nome_entidade} atualizado: {antes['nome']}",
+        valor_anterior=antes, valor_novo=body,
+        ip=request.client.host if request else None,
+    )
+    return {"ok": True}
+
+
+@router.delete("/cadastros/{entidade}/{item_id}", tags=["cadastros"])
+async def excluir_cadastro(
+    entidade: str,
+    item_id: UUID,
+    request: Request = None,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    papel = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+    if papel not in ("ADMIN", "GESTOR_EMPRESA"):
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+    if entidade not in CADASTROS_CONFIG:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado.")
+    from sqlalchemy import text as sqlt
+    tabela = CADASTROS_CONFIG[entidade]["tabela"]
+    nome_entidade = CADASTROS_CONFIG[entidade]["nome"]
+
+    res = await db.execute(sqlt(f"SELECT nome FROM {tabela} WHERE id = :id"), {"id": str(item_id)})
+    row = res.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Registro não encontrado.")
+    
+    # Soft delete — apenas desativa
+    await db.execute(sqlt(f"UPDATE {tabela} SET ativo = false WHERE id = :id"), {"id": str(item_id)})
+    await db.commit()
+    await registrar_audit(db, "DELETE",
+        usuario_id=str(current_user.id), usuario_nome=current_user.nome, usuario_email=current_user.email,
+        entidade=entidade, entidade_id=str(item_id),
+        descricao=f"{nome_entidade} desativado: {row[0]}",
+        valor_anterior={"nome": row[0], "ativo": True}, valor_novo={"ativo": False},
+        ip=request.client.host if request else None,
+    )
+    return {"ok": True}
+
+
+# ─────────────────────────────────────────────
 # Importação CSV
 # ─────────────────────────────────────────────
 
