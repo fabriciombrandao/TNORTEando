@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../services/api";
 import toast from "react-hot-toast";
-import { ArrowLeft, Plus, Pencil, Trash2, X, Check, Search, Star, Phone, Mail } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, Trash2, X, Check, Search, Star, Phone, Mail, MessageCircle } from "lucide-react";
 
 const listarContatos  = (id: string) => api.get(`/api/v1/clientes/${id}/contatos`).then(r => r.data);
 const criarContato    = (id: string, body: any) => api.post(`/api/v1/clientes/${id}/contatos`, body).then(r => r.data);
@@ -12,6 +12,10 @@ const removerContato  = (cliId: string, conId: string) => api.delete(`/api/v1/cl
 const buscarContatos  = (q: string) => api.get(`/api/v1/contatos/buscar`, { params: { q } }).then(r => r.data);
 const listarDepts     = () => api.get(`/api/v1/cadastros/departamentos`).then(r => r.data);
 const listarTipos     = () => api.get(`/api/v1/cadastros/tipos_contato`).then(r => r.data);
+
+function foneWA(tel: string) {
+  return tel.replace(/\D/g, "");
+}
 
 function iniciais(nome: string) {
   return nome.split(" ").filter(Boolean).slice(0, 2).map(n => n[0]).join("").toUpperCase();
@@ -228,18 +232,28 @@ export default function ContatosClientePage() {
                     {c.tipo && <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-medium">{c.tipo}</span>}
                     {c.departamento && <span className="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full font-medium">{c.departamento}</span>}
                   </div>
-                  <div className="flex flex-col gap-1 mt-2">
-                    {c.telefone && (
-                      <a href={`tel:${c.telefone}`} className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-indigo-600">
-                        <Phone className="w-3 h-3" /> {c.telefone}
-                      </a>
-                    )}
-                    {c.email && (
-                      <a href={`mailto:${c.email}`} className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-indigo-600">
-                        <Mail className="w-3 h-3" /> {c.email}
-                      </a>
-                    )}
-                  </div>
+                  {(c.telefone || c.email) && (
+                    <div className="flex items-center gap-2 mt-3 pt-3 border-t border-slate-50">
+                      {c.telefone && (
+                        <>
+                          <a href={`tel:${c.telefone}`} title={c.telefone}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-indigo-50 hover:text-indigo-600 rounded-lg text-xs text-slate-600 font-medium transition-colors">
+                            <Phone className="w-3.5 h-3.5" /> Ligar
+                          </a>
+                          <a href={`https://wa.me/55${foneWA(c.telefone)}`} target="_blank" rel="noreferrer" title="WhatsApp"
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 rounded-lg text-xs font-medium transition-colors">
+                            <MessageCircle className="w-3.5 h-3.5" /> WhatsApp
+                          </a>
+                        </>
+                      )}
+                      {c.email && (
+                        <a href={`mailto:${c.email}`} title={c.email}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-blue-50 hover:text-blue-600 rounded-lg text-xs text-slate-600 font-medium transition-colors">
+                          <Mail className="w-3.5 h-3.5" /> E-mail
+                        </a>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="flex gap-1 flex-shrink-0">
                   <button onClick={() => { setEditando(c); setModal("editar"); }}
