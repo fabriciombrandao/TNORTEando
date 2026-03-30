@@ -64,6 +64,11 @@ export default function ClienteDetalhe() {
 
   const vendedor  = (usuarios as any[]).find(u => u.id === cliente.vendedor_responsavel_id);
   const contratos = cliente.contratos || [];
+  const { data: contatosData = [] } = useQuery({
+    queryKey: ["contatos", id],
+    queryFn: () => api.get(`/api/v1/clientes/${id}/contatos`).then(r => r.data),
+    enabled: !!id,
+  });
   const ctAtivos  = contratos.filter((c: any) => c.status === "ATIVO");
   const mrr       = ctAtivos.reduce((s: number, c: any) => s + (c.valor_mensal || 0), 0);
   const hv        = cliente.historico_vendas || {};
@@ -154,8 +159,8 @@ export default function ClienteDetalhe() {
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-slate-900">Contatos</p>
             <p className="text-xs text-slate-400 mt-0.5">
-              {(contatos as any[]).length > 0
-                ? `${(contatos as any[]).length} contato${(contatos as any[]).length !== 1 ? "s" : ""} cadastrado${(contatos as any[]).length !== 1 ? "s" : ""}`
+              {(contatosData as any[]).length > 0
+                ? `${(contatosData as any[]).length} contato${(contatosData as any[]).length !== 1 ? "s" : ""} cadastrado${(contatosData as any[]).length !== 1 ? "s" : ""}`
                 : "Nenhum contato cadastrado"}
             </p>
           </div>
