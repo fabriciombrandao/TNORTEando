@@ -41,6 +41,12 @@ export default function ClienteDetalhe() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
+  const { data: contatosData = [] } = useQuery({
+    queryKey: ["contatos", id],
+    queryFn: () => api.get(`/api/v1/clientes/${id}/contatos`).then(r => r.data),
+    enabled: !!id,
+  });
+
   const { data: cliente, isLoading } = useQuery({
     queryKey: ["cliente", id],
     queryFn: () => getCliente(id!),
@@ -64,11 +70,6 @@ export default function ClienteDetalhe() {
 
   const vendedor  = (usuarios as any[]).find(u => u.id === cliente.vendedor_responsavel_id);
   const contratos = cliente.contratos || [];
-  const { data: contatosData = [] } = useQuery({
-    queryKey: ["contatos", id],
-    queryFn: () => api.get(`/api/v1/clientes/${id}/contatos`).then(r => r.data),
-    enabled: !!id,
-  });
   const ctAtivos  = contratos.filter((c: any) => c.status === "ATIVO");
   const mrr       = ctAtivos.reduce((s: number, c: any) => s + (c.valor_mensal || 0), 0);
   const hv        = cliente.historico_vendas || {};
