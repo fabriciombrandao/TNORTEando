@@ -9,7 +9,8 @@ import {
 
 const getUsuarios    = ()           => api.get("/api/v1/usuarios").then(r => r.data);
 const criarUsuario   = (d: any)     => api.post("/api/v1/usuarios", d).then(r => r.data);
-const editarUsuario  = ({id, ...d}: any) => api.put(`/api/v1/usuarios/${id}`, d).then(r => r.data);
+const editarUsuario    = ({id, ...d}: any) => api.put(`/api/v1/usuarios/${id}`, d).then(r => r.data);
+const enviarAtivacao   = (id: string) => api.post("/api/v1/auth/enviar-ativacao", { usuario_id: id }).then(r => r.data);
 const redefinirSenha = ({id, senha}: any) => api.post(`/api/v1/usuarios/${id}/redefinir-senha`, {senha}).then(r => r.data);
 const toggleAtivo    = ({id, ativo}: any) => api.patch(`/api/v1/usuarios/${id}/ativo`, {ativo}).then(r => r.data);
 
@@ -199,6 +200,12 @@ export default function UsuariosPage() {
 
   const { data: usuarios = [], isLoading } = useQuery({ queryKey: ["usuarios"], queryFn: getUsuarios });
 
+  const mutAtivacao = useMutation({
+    mutationFn: (id: string) => enviarAtivacao(id),
+    onSuccess: () => toast.success("E-mail de ativação enviado!"),
+    onError: (e: any) => toast.error(e.response?.data?.detail || "Erro ao enviar e-mail."),
+  });
+
   const mutCriar = useMutation({
     mutationFn: criarUsuario,
     onSuccess: () => { toast.success("Usuário criado!"); qc.invalidateQueries({queryKey:["usuarios"]}); setModalCriar(false); setForm({...FORM_VAZIO}); },
@@ -308,6 +315,9 @@ export default function UsuariosPage() {
                         {u.ativo === false && (
                           <span className="text-xs bg-red-50 text-red-500 px-1.5 py-0.5 rounded font-medium border border-red-100">Inativo</span>
                         )}
+                        {u.primeiro_acesso && u.ativo !== false && (
+                          <span className="text-xs bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded font-medium border border-amber-100">Aguarda ativação</span>
+                        )}
                       </div>
                       <p className="text-xs text-slate-400 mt-0.5">{u.email}</p>
                       {u.codigo_externo && (
@@ -323,6 +333,12 @@ export default function UsuariosPage() {
                       </button>
                       {menuAberto === u.id && (
                         <div className="absolute right-0 top-9 z-20 w-44 bg-white rounded-xl shadow-lg border border-slate-100 overflow-hidden">
+                          {u.primeiro_acesso && (
+                            <button onClick={() => { mutAtivacao.mutate(u.id); setMenuAberto(null); }}
+                              className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-indigo-600 hover:bg-indigo-50">
+                              <KeyRound className="w-4 h-4" /> Enviar ativação
+                            </button>
+                          )}
                           <button onClick={() => abrirEditar(u)}
                             className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50">
                             <Pencil className="w-4 h-4 text-slate-400" /> Editar dados

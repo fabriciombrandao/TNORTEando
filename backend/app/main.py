@@ -78,7 +78,7 @@ async def login(form: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = 
     return TokenResponse(
         access_token=create_access_token(str(user.id)),
         refresh_token=create_refresh_token(str(user.id)),
-        usuario={"id": str(user.id), "nome": user.nome, "papel": user.papel, "email": user.email, "codigo_externo": user.codigo_externo},
+        usuario={"id": str(user.id), "nome": user.nome, "papel": user.papel, "email": user.email, "codigo_externo": user.codigo_externo, "primeiro_acesso": bool(user.primeiro_acesso)},
     )
 
 @router.get("/auth/me", tags=["auth"])
@@ -98,6 +98,146 @@ async def me(current_user: Usuario = Depends(get_current_user)):
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+# ─────────────────────────────────────────────
+# E-mail
+# ─────────────────────────────────────────────
+
+async def enviar_email(para: str, assunto: str, corpo_html: str):
+    import smtplib, os
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    host  = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    port  = int(os.getenv("SMTP_PORT", "587"))
+    user  = os.getenv("SMTP_USER", "")
+    pwd   = os.getenv("SMTP_PASS", "")
+    from_ = os.getenv("SMTP_FROM", user)
+    if not user or not pwd:
+        raise ValueError("SMTP não configurado.")
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = assunto
+    msg["From"]    = from_
+    msg["To"]      = para
+    msg.attach(MIMEText(corpo_html, "html"))
+    with smtplib.SMTP(host, port) as s:
+        s.starttls()
+        s.login(user, pwd)
+        s.send_message(msg)
+
+
+# ─────────────────────────────────────────────
+# Ativação e recuperação de senha
+# ─────────────────────────────────────────────
+
+@router.post("/auth/enviar-ativacao", tags=["auth"])
+async def enviar_ativacao(
+    body: dict,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import text as sqlt
+    import secrets, os
+    from datetime import datetime, timedelta, timezone
+    usuario_id = body.get("usuario_id")
+    if not usuario_id:
+        raise HTTPException(status_code=400, detail="usuario_id obrigatório.")
+    res = await db.execute(sqlt("SELECT id, nome, email FROM usuarios WHERE id = :id AND ativo = true"), {"id": usuario_id})
+    u = res.fetchone()
+    if not u:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+    token = secrets.token_urlsafe(32)
+    expira = datetime.now(timezone.utc) + timedelta(hours=48)
+    await db.execute(sqlt("UPDATE tokens_usuario SET usado = true WHERE usuario_id = :uid AND tipo = 'ATIVACAO' AND usado = false"), {"uid": usuario_id})
+    await db.execute(sqlt("INSERT INTO tokens_usuario (usuario_id, token, tipo, expira_em) VALUES (:uid, :tok, 'ATIVACAO', :exp)"), {"uid": usuario_id, "tok": token, "exp": expira})
+    await db.commit()
+    base_url = os.getenv("APP_URL", "https://tnorteando.cloud")
+    link = f"{base_url}/ativar?token={token}"
+    corpo = f"""<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px">
+      <h2 style="color:#4f46e5">Bem-vindo ao TNORTEando!</h2>
+      <p>Olá, <strong>{u[1]}</strong>!</p>
+      <p>Sua conta foi criada. Clique no botão abaixo para definir sua senha:</p>
+      <a href="{link}" style="display:inline-block;margin:24px 0;padding:12px 24px;background:#4f46e5;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">Ativar minha conta</a>
+      <p style="color:#888;font-size:12px">Link expira em 48 horas.</p>
+    </div>"""
+    await enviar_email(u[2], "Ative sua conta no TNORTEando", corpo)
+    return {"ok": True, "mensagem": f"E-mail enviado para {u[2]}"}
+
+
+@router.post("/auth/ativar", tags=["auth"])
+async def ativar_conta(body: dict, db: AsyncSession = Depends(get_db)):
+    from sqlalchemy import text as sqlt
+    from app.core.security import get_password_hash
+    from datetime import datetime, timezone
+    token = body.get("token", "")
+    senha = body.get("senha", "")
+    if len(senha) < 6:
+        raise HTTPException(status_code=400, detail="Senha deve ter ao menos 6 caracteres.")
+    res = await db.execute(sqlt("SELECT t.id, t.usuario_id, t.expira_em, t.usado FROM tokens_usuario t WHERE t.token = :tok AND t.tipo = 'ATIVACAO'"), {"tok": token})
+    row = res.fetchone()
+    if not row:
+        raise HTTPException(status_code=400, detail="Link inválido.")
+    if row[3]:
+        raise HTTPException(status_code=400, detail="Link já utilizado.")
+    if row[2] < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Link expirado. Solicite um novo ao administrador.")
+    hashed = get_password_hash(senha)
+    await db.execute(sqlt("UPDATE usuarios SET senha_hash = :h, primeiro_acesso = false WHERE id = :id"), {"h": hashed, "id": str(row[1])})
+    await db.execute(sqlt("UPDATE tokens_usuario SET usado = true WHERE id = :id"), {"id": str(row[0])})
+    await db.commit()
+    return {"ok": True, "mensagem": "Conta ativada! Faça login para continuar."}
+
+
+@router.post("/auth/esqueci-senha", tags=["auth"])
+async def esqueci_senha(body: dict, db: AsyncSession = Depends(get_db)):
+    from sqlalchemy import text as sqlt
+    import secrets, os
+    from datetime import datetime, timedelta, timezone
+    email = body.get("email", "").lower().strip()
+    if not email:
+        raise HTTPException(status_code=400, detail="E-mail obrigatório.")
+    res = await db.execute(sqlt("SELECT id, nome, email FROM usuarios WHERE email = :e AND ativo = true"), {"e": email})
+    u = res.fetchone()
+    if u:
+        token = secrets.token_urlsafe(32)
+        expira = datetime.now(timezone.utc) + timedelta(hours=2)
+        await db.execute(sqlt("UPDATE tokens_usuario SET usado = true WHERE usuario_id = :uid AND tipo = 'RECUPERACAO' AND usado = false"), {"uid": str(u[0])})
+        await db.execute(sqlt("INSERT INTO tokens_usuario (usuario_id, token, tipo, expira_em) VALUES (:uid, :tok, 'RECUPERACAO', :exp)"), {"uid": str(u[0]), "tok": token, "exp": expira})
+        await db.commit()
+        base_url = os.getenv("APP_URL", "https://tnorteando.cloud")
+        link = f"{base_url}/redefinir-senha?token={token}"
+        corpo = f"""<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px">
+          <h2 style="color:#4f46e5">Recuperação de senha</h2>
+          <p>Olá, <strong>{u[1]}</strong>!</p>
+          <p>Clique abaixo para redefinir sua senha:</p>
+          <a href="{link}" style="display:inline-block;margin:24px 0;padding:12px 24px;background:#4f46e5;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">Redefinir minha senha</a>
+          <p style="color:#888;font-size:12px">Link expira em 2 horas.</p>
+        </div>"""
+        await enviar_email(u[2], "Recuperação de senha — TNORTEando", corpo)
+    return {"ok": True, "mensagem": "Se o e-mail existir, você receberá as instruções em breve."}
+
+
+@router.post("/auth/redefinir-senha", tags=["auth"])
+async def redefinir_senha_token(body: dict, db: AsyncSession = Depends(get_db)):
+    from sqlalchemy import text as sqlt
+    from app.core.security import get_password_hash
+    from datetime import datetime, timezone
+    token = body.get("token", "")
+    senha = body.get("senha", "")
+    if len(senha) < 6:
+        raise HTTPException(status_code=400, detail="Senha deve ter ao menos 6 caracteres.")
+    res = await db.execute(sqlt("SELECT t.id, t.usuario_id, t.expira_em, t.usado FROM tokens_usuario t WHERE t.token = :tok AND t.tipo = 'RECUPERACAO'"), {"tok": token})
+    row = res.fetchone()
+    if not row or row[3]:
+        raise HTTPException(status_code=400, detail="Link inválido ou já utilizado.")
+    if row[2] < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Link expirado. Solicite um novo.")
+    hashed = get_password_hash(senha)
+    await db.execute(sqlt("UPDATE usuarios SET senha_hash = :h WHERE id = :id"), {"h": hashed, "id": str(row[1])})
+    await db.execute(sqlt("UPDATE tokens_usuario SET usado = true WHERE id = :id"), {"id": str(row[0])})
+    await db.commit()
+    return {"ok": True, "mensagem": "Senha redefinida com sucesso!"}
+
 
 # ─────────────────────────────────────────────
 # Usuarios
@@ -161,6 +301,26 @@ async def editar_usuario(
     if not updates:
         raise HTTPException(status_code=400, detail="Nenhum campo para atualizar.")
     await db.execute(sqlt(f"UPDATE usuarios SET {', '.join(updates)} WHERE id = :id"), params)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/auth/trocar-senha", tags=["auth"])
+async def trocar_senha_primeiro_acesso(
+    body: dict,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Troca senha no primeiro acesso e marca primeiro_acesso = false."""
+    from sqlalchemy import text as sqlt
+    from app.core.security import get_password_hash
+    nova_senha = body.get("senha", "")
+    if len(nova_senha) < 6:
+        raise HTTPException(status_code=400, detail="Senha deve ter ao menos 6 caracteres.")
+    hashed = get_password_hash(nova_senha)
+    await db.execute(sqlt(
+        "UPDATE usuarios SET senha_hash = :h, primeiro_acesso = false WHERE id = :id"
+    ), {"h": hashed, "id": str(current_user.id)})
     await db.commit()
     return {"ok": True}
 
@@ -853,6 +1013,210 @@ async def historico_visitas(
         }
         for r in rows
     ]
+
+# ─────────────────────────────────────────────
+# Ciclo de visitas / Agenda automática
+# ─────────────────────────────────────────────
+
+@router.get("/agenda/parametros", tags=["agenda"])
+async def get_parametros_visita(
+    esn_id: Optional[str] = None,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retorna parâmetros de visita efetivos para um ESN."""
+    from app.services.ciclo_service import get_parametros
+    from sqlalchemy import text as sqlt
+
+    uid = esn_id or str(current_user.id)
+
+    # Buscar GSN e org do ESN
+    res = await db.execute(sqlt("""
+        SELECT hv.superior_id, u.organizacao_id
+        FROM hierarquia_vendas hv
+        JOIN usuarios u ON u.id = hv.subordinado_id
+        WHERE hv.subordinado_id = :uid LIMIT 1
+    """), {"uid": uid})
+    row = res.fetchone()
+    gsn_id = str(row[0]) if row else uid
+    org_id = str(row[1]) if row else uid
+
+    params = await get_parametros(db, uid, gsn_id, org_id)
+    return params
+
+
+@router.post("/agenda/parametros", tags=["agenda"])
+async def salvar_parametros_visita(
+    body: dict,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Salva parâmetros de visita para um escopo específico."""
+    from sqlalchemy import text as sqlt
+    papel = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+    if papel not in ("ADMIN", "GESTOR_EMPRESA", "GSN", "CS"):
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+
+    escopo = {}
+    if body.get("esn_id"):    escopo["esn_id"] = body["esn_id"]
+    elif body.get("gsn_id"):  escopo["gsn_id"] = body["gsn_id"]
+    elif body.get("org_id"):  escopo["organizacao_id"] = body["org_id"]
+
+    await db.execute(sqlt("""
+        INSERT INTO parametros_visita
+            (freq_a_dias, freq_b_dias, freq_c_dias, ciclo_dias, visitas_dia_max, horizonte_dias,
+             organizacao_id, gsn_id, esn_id)
+        VALUES (:a, :b, :c, :ciclo, :max_dia, :horizonte, :org, :gsn, :esn)
+    """), {
+        "a": body.get("freq_a_dias", 15),
+        "b": body.get("freq_b_dias", 30),
+        "c": body.get("freq_c_dias", 45),
+        "ciclo": body.get("ciclo_dias", 45),
+        "max_dia": body.get("visitas_dia_max", 4),
+        "horizonte": body.get("horizonte_dias", 30),
+        "org": escopo.get("organizacao_id"),
+        "gsn": escopo.get("gsn_id"),
+        "esn": escopo.get("esn_id"),
+    })
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/agenda/gerar-ciclo", tags=["agenda"])
+async def gerar_agenda_ciclo(
+    body: dict,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Gera agenda automática para um ESN baseada no ciclo ABC.
+    CS/GSN pode gerar para qualquer ESN sob sua hierarquia.
+    """
+    from app.services.ciclo_service import gerar_agenda_ciclo as _gerar
+    from sqlalchemy import text as sqlt
+    from datetime import date as _date
+
+    papel = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+    esn_id = body.get("esn_id") or str(current_user.id)
+
+    # Buscar GSN e org do ESN
+    res = await db.execute(sqlt("""
+        SELECT hv.superior_id, u.organizacao_id, u.uf_atuacao
+        FROM hierarquia_vendas hv
+        JOIN usuarios u ON u.id = hv.subordinado_id
+        WHERE hv.subordinado_id = :uid LIMIT 1
+    """), {"uid": esn_id})
+    row = res.fetchone()
+    gsn_id = str(row[0]) if row else esn_id
+    org_id = str(row[1]) if row else esn_id
+    uf_esn  = row[2] if row and row[2] else "TO"
+
+    data_inicio = _date.fromisoformat(body["data_inicio"]) if body.get("data_inicio") else _date.today()
+
+    agenda_items = await _gerar(db, esn_id, gsn_id, org_id, uf_esn, data_inicio)
+
+    if not agenda_items:
+        return {"ok": True, "total": 0, "mensagem": "Nenhuma visita necessária no período."}
+
+    # Criar agendas por dia
+    criados = 0
+    from app.services.agenda_service import AgendaService
+    from collections import defaultdict
+
+    por_dia = defaultdict(list)
+    for item in agenda_items:
+        por_dia[item["data"]].append(item)
+
+    for dia, itens in por_dia.items():
+        # Verificar se já existe agenda para este ESN neste dia
+        res_ag = await db.execute(sqlt(
+            "SELECT id FROM agendas WHERE vendedor_id=:v AND data=:d"
+        ), {"v": esn_id, "d": dia})
+        ag_row = res_ag.fetchone()
+
+        if not ag_row:
+            ag_id = str(uuid.uuid4())
+            await db.execute(sqlt("""
+                INSERT INTO agendas (id, vendedor_id, data, gerada_por, publicada)
+                VALUES (:id, :v, :d, 'CICLO', false)
+                ON CONFLICT (vendedor_id, data) DO NOTHING
+            """), {"id": ag_id, "v": esn_id, "d": dia})
+            res_ag2 = await db.execute(sqlt(
+                "SELECT id FROM agendas WHERE vendedor_id=:v AND data=:d"
+            ), {"v": esn_id, "d": dia})
+            ag_row = res_ag2.fetchone()
+
+        ag_id = str(ag_row[0])
+
+        for item in itens:
+            await db.execute(sqlt("""
+                INSERT INTO agenda_itens (id, agenda_id, cliente_id, ordem, status)
+                VALUES (:id, :ag, :cli, :ord, 'PENDENTE')
+                ON CONFLICT DO NOTHING
+            """), {
+                "id": str(uuid.uuid4()),
+                "ag": ag_id,
+                "cli": item["cliente_id"],
+                "ord": item["ordem"],
+            })
+            criados += 1
+
+    await db.commit()
+    return {"ok": True, "total": criados, "dias": len(por_dia)}
+
+
+@router.get("/agenda/ciclo/preview", tags=["agenda"])
+async def preview_agenda_ciclo(
+    esn_id: Optional[str] = None,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Preview da agenda gerada sem salvar."""
+    from app.services.ciclo_service import gerar_agenda_ciclo as _gerar
+    from sqlalchemy import text as sqlt
+    from datetime import date as _date
+
+    uid = esn_id or str(current_user.id)
+    res = await db.execute(sqlt("""
+        SELECT hv.superior_id, u.organizacao_id, u.uf_atuacao
+        FROM hierarquia_vendas hv
+        JOIN usuarios u ON u.id = hv.subordinado_id
+        WHERE hv.subordinado_id = :uid LIMIT 1
+    """), {"uid": uid})
+    row = res.fetchone()
+    gsn_id = str(row[0]) if row else uid
+    org_id = str(row[1]) if row else uid
+    uf_esn  = row[2] if row and row[2] else "TO"
+
+    items = await _gerar(db, uid, gsn_id, org_id, uf_esn, _date.today())
+    return {"total": len(items), "items": items[:50]}
+
+
+@router.get("/agenda/justificativas", tags=["agenda"])
+async def listar_justificativas(
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import text as sqlt
+    res = await db.execute(sqlt("SELECT id, texto FROM justificativas_agenda WHERE ativo=true ORDER BY texto"))
+    return [{"id": str(r[0]), "texto": r[1]} for r in res.fetchall()]
+
+
+@router.get("/feriados", tags=["agenda"])
+async def listar_feriados(
+    uf: Optional[str] = None,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import text as sqlt
+    where = "WHERE data >= CURRENT_DATE"
+    params = {}
+    if uf:
+        where += " AND (uf IS NULL OR uf = :uf)"
+        params["uf"] = uf.upper()
+    res = await db.execute(sqlt(f"SELECT data, nome, uf FROM feriados {where} ORDER BY data"), params)
+    return [{"data": str(r[0]), "nome": r[1], "uf": r[2]} for r in res.fetchall()]
+
 
 # ─────────────────────────────────────────────
 # Importação CSV

@@ -13,6 +13,10 @@ import LicenciamentoPage from "./pages/LicenciamentoPage";
 import ContratosPage from "./pages/ContratosPage";
 import ConfiguracoesPage from "./pages/ConfiguracoesPage";
 import UsuariosPage from "./pages/UsuariosPage";
+import PrimeiroAcessoPage from "./pages/PrimeiroAcessoPage";
+import AtivarContaPage from "./pages/AtivarContaPage";
+import RedefinirSenhaPage from "./pages/RedefinirSenhaPage";
+import EsqueciSenhaPage from "./pages/EsqueciSenhaPage";
 
 const qc = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -20,7 +24,10 @@ const qc = new QueryClient({
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isLoggedIn = useAuthStore((s) => s.isLoggedIn());
-  return isLoggedIn ? <>{children}</> : <Navigate to="/login" replace />;
+  const usuario = useAuthStore((s) => s.usuario);
+  if (!isLoggedIn) return <Navigate to="/login" replace />;
+  if ((usuario as any)?.primeiro_acesso) return <Navigate to="/primeiro-acesso" replace />;
+  return <>{children}</>;
 }
 
 function DashboardPlaceholder() {
@@ -105,6 +112,10 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/primeiro-acesso" element={<PrimeiroAcessoPage />} />
+          <Route path="/ativar" element={<AtivarContaPage />} />
+          <Route path="/redefinir-senha" element={<RedefinirSenhaPage />} />
+          <Route path="/esqueci-senha" element={<EsqueciSenhaPage />} />
           <Route
             path="/"
             element={

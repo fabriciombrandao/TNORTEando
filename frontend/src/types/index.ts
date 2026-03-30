@@ -8,6 +8,7 @@ export interface Usuario {
   codigo_externo?: string;
   telefone?: string;
   ativo: boolean;
+  primeiro_acesso?: boolean;
 }
 
 export interface Cliente {
