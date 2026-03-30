@@ -440,8 +440,18 @@ async def editar_usuario(
         updates.append("papel = :papel"); params["papel"] = body["papel"]
     if not updates:
         raise HTTPException(status_code=400, detail="Nenhum campo para atualizar.")
+    res_antes = await db.execute(sqlt("SELECT nome, email, papel, telefone FROM usuarios WHERE id = :id"), {"id": str(usuario_id)})
+    row_antes = res_antes.fetchone()
+    antes = {"nome": row_antes[0], "email": row_antes[1], "papel": str(row_antes[2]), "telefone": row_antes[3]} if row_antes else {}
     await db.execute(sqlt(f"UPDATE usuarios SET {', '.join(updates)} WHERE id = :id"), params)
     await db.commit()
+    depois = {k: body[k] for k in ["nome","email","papel","telefone","codigo_externo"] if k in body}
+    await registrar_audit(db, "UPDATE",
+        usuario_id=str(current_user.id), usuario_nome=current_user.nome, usuario_email=current_user.email,
+        entidade="usuarios", entidade_id=str(usuario_id),
+        descricao=f"Usuário atualizado: {antes.get('nome','')}",
+        valor_anterior=antes, valor_novo=depois,
+    )
     return {"ok": True}
 
 
@@ -480,9 +490,16 @@ async def redefinir_senha(
     if len(nova_senha) < 6:
         raise HTTPException(status_code=400, detail="Senha deve ter ao menos 6 caracteres.")
     hashed = get_password_hash(nova_senha)
+    res_u = await db.execute(sqlt("SELECT nome FROM usuarios WHERE id = :id"), {"id": str(usuario_id)})
+    row_u = res_u.fetchone()
     await db.execute(sqlt("UPDATE usuarios SET senha_hash = :h WHERE id = :id"),
         {"h": hashed, "id": str(usuario_id)})
     await db.commit()
+    await registrar_audit(db, "UPDATE",
+        usuario_id=str(current_user.id), usuario_nome=current_user.nome, usuario_email=current_user.email,
+        entidade="usuarios", entidade_id=str(usuario_id),
+        descricao=f"Senha redefinida para: {row_u[0] if row_u else str(usuario_id)}",
+    )
     return {"ok": True}
 
 
@@ -497,9 +514,17 @@ async def toggle_usuario_ativo(
         raise HTTPException(status_code=403, detail="Sem permissão.")
     from sqlalchemy import text as sqlt
     ativo = bool(body.get("ativo", True))
+    res_u = await db.execute(sqlt("SELECT nome FROM usuarios WHERE id = :id"), {"id": str(usuario_id)})
+    row_u = res_u.fetchone()
     await db.execute(sqlt("UPDATE usuarios SET ativo = :a WHERE id = :id"),
         {"a": ativo, "id": str(usuario_id)})
     await db.commit()
+    await registrar_audit(db, "UPDATE",
+        usuario_id=str(current_user.id), usuario_nome=current_user.nome, usuario_email=current_user.email,
+        entidade="usuarios", entidade_id=str(usuario_id),
+        descricao=f"Usuário {'ativado' if ativo else 'desativado'}: {row_u[0] if row_u else str(usuario_id)}",
+        valor_anterior={"ativo": not ativo}, valor_novo={"ativo": ativo},
+    )
     return {"ok": True, "ativo": ativo}
 
 
@@ -2607,6 +2632,12 @@ async def criar_usuario(
         "t": body.get("telefone","").strip() or None,
     })
     await db.commit()
+    await registrar_audit(db, "CREATE",
+        usuario_id=str(current_user.id), usuario_nome=current_user.nome, usuario_email=current_user.email,
+        entidade="usuarios", entidade_id=uid,
+        descricao=f"Usuário criado: {body.get('nome','')} ({body.get('papel','ESN')})",
+        valor_novo={"nome": body.get("nome",""), "email": email, "papel": body.get("papel","ESN")},
+    )
     return {"id": uid, "mensagem": "Usuário criado com sucesso."}
 
 
