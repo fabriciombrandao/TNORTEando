@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
@@ -69,17 +69,46 @@ class TokenResponse(BaseModel):
     usuario: dict
 
 @router.post("/auth/login", response_model=TokenResponse, tags=["auth"])
-async def login(form: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
+async def login(form: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db), request: Request = None):
     stmt = select(Usuario).where(Usuario.email == form.username.lower())
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
+    ip = request.client.host if request else None
+    ua = request.headers.get("user-agent") if request else None
     if not user or not verify_password(form.password, user.senha_hash):
+        # Registrar tentativa falha
+        await registrar_audit(db, "LOGIN_FALHA",
+            usuario_email=form.username.lower(),
+            descricao="Tentativa de login com credenciais inválidas.",
+            ip=ip, user_agent=ua, sucesso=False)
         raise HTTPException(status_code=401, detail="Credenciais inválidas.")
+    # Registrar login bem-sucedido
+    await registrar_audit(db, "LOGIN",
+        usuario_id=str(user.id), usuario_nome=user.nome, usuario_email=user.email,
+        descricao=f"Login realizado com sucesso.",
+        ip=ip, user_agent=ua, sucesso=True)
     return TokenResponse(
         access_token=create_access_token(str(user.id)),
         refresh_token=create_refresh_token(str(user.id)),
         usuario={"id": str(user.id), "nome": user.nome, "papel": user.papel, "email": user.email, "codigo_externo": user.codigo_externo, "primeiro_acesso": bool(user.primeiro_acesso)},
     )
+
+@router.post("/auth/logout", tags=["auth"])
+async def logout(
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    request: Request = None,
+):
+    ip = request.client.host if request else None
+    ua = request.headers.get("user-agent") if request else None
+    await registrar_audit(db, "LOGOUT",
+        usuario_id=str(current_user.id),
+        usuario_nome=current_user.nome,
+        usuario_email=current_user.email,
+        descricao="Logout realizado.",
+        ip=ip, user_agent=ua, sucesso=True)
+    return {"ok": True}
+
 
 @router.get("/auth/me", tags=["auth"])
 async def me(current_user: Usuario = Depends(get_current_user)):
@@ -98,6 +127,116 @@ async def me(current_user: Usuario = Depends(get_current_user)):
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+# ─────────────────────────────────────────────
+# Auditoria
+# ─────────────────────────────────────────────
+
+async def registrar_audit(
+    db: AsyncSession,
+    acao: str,
+    usuario_id: str = None,
+    usuario_nome: str = None,
+    usuario_email: str = None,
+    entidade: str = None,
+    entidade_id: str = None,
+    descricao: str = None,
+    valor_anterior: dict = None,
+    valor_novo: dict = None,
+    ip: str = None,
+    user_agent: str = None,
+    sucesso: bool = True,
+):
+    import json as _json
+    from sqlalchemy import text as sqlt
+    try:
+        await db.execute(sqlt("""
+            INSERT INTO audit_log (
+                usuario_id, usuario_nome, usuario_email, acao,
+                entidade, entidade_id, descricao,
+                valor_anterior, valor_novo, ip, user_agent, sucesso
+            ) VALUES (
+                :uid, :unome, :uemail, :acao,
+                :entidade, :eid, :desc,
+                :vant, :vnov, :ip, :ua, :sucesso
+            )
+        """), {
+            "uid": usuario_id,
+            "unome": usuario_nome,
+            "uemail": usuario_email,
+            "acao": acao,
+            "entidade": entidade,
+            "eid": entidade_id,
+            "desc": descricao,
+            "vant": _json.dumps(valor_anterior) if valor_anterior else None,
+            "vnov": _json.dumps(valor_novo) if valor_novo else None,
+            "ip": ip,
+            "ua": user_agent,
+            "sucesso": sucesso,
+        })
+        await db.commit()
+    except Exception:
+        pass  # Auditoria nunca deve quebrar o fluxo principal
+
+
+# ─────────────────────────────────────────────
+# Consulta de auditoria (apenas ADMIN)
+# ─────────────────────────────────────────────
+
+@router.get("/auditoria", tags=["auditoria"])
+async def listar_auditoria(
+    acao: Optional[str] = None,
+    usuario_email: Optional[str] = None,
+    entidade: Optional[str] = None,
+    data_inicio: Optional[str] = None,
+    data_fim: Optional[str] = None,
+    limit: int = 100,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    papel = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+    if papel != "ADMIN":
+        raise HTTPException(status_code=403, detail="Acesso restrito ao Administrador.")
+    from sqlalchemy import text as sqlt
+    where = []
+    params = {"limit": limit}
+    if acao:
+        where.append("acao = :acao"); params["acao"] = acao
+    if usuario_email:
+        where.append("usuario_email ILIKE :uemail"); params["uemail"] = f"%{usuario_email}%"
+    if entidade:
+        where.append("entidade = :entidade"); params["entidade"] = entidade
+    if data_inicio:
+        where.append("criado_em >= :di"); params["di"] = data_inicio
+    if data_fim:
+        where.append("criado_em <= :df"); params["df"] = data_fim
+    where_sql = "WHERE " + " AND ".join(where) if where else ""
+    res = await db.execute(sqlt(f"""
+        SELECT id, usuario_id, usuario_nome, usuario_email, acao,
+               entidade, entidade_id, descricao, sucesso, ip, criado_em
+        FROM audit_log
+        {where_sql}
+        ORDER BY criado_em DESC
+        LIMIT :limit
+    """), params)
+    rows = res.fetchall()
+    return [
+        {
+            "id": str(r[0]),
+            "usuario_id": str(r[1]) if r[1] else None,
+            "usuario_nome": r[2],
+            "usuario_email": r[3],
+            "acao": r[4],
+            "entidade": r[5],
+            "entidade_id": r[6],
+            "descricao": r[7],
+            "sucesso": bool(r[8]),
+            "ip": r[9],
+            "criado_em": str(r[10]),
+        }
+        for r in rows
+    ]
 
 
 # ─────────────────────────────────────────────

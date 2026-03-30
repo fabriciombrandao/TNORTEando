@@ -3,7 +3,7 @@ import { useAuthStore } from "../../store/auth";
 import {
   LayoutDashboard, MapPin, CalendarDays, Users,
   UploadCloud, LogOut, CheckSquare, Settings,
-  Menu, X, ChevronRight, KeyRound, Eye, EyeOff
+  Menu, X, ChevronRight, KeyRound, Eye, EyeOff, ShieldAlert
 } from "lucide-react";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -45,6 +45,11 @@ const NAV_ITEMS = [
   {
     to: "/usuarios", label: "Usuários", icon: Users,
     papeis: ["ADMIN", "GESTOR_CONSOLIDADORA", "GESTOR_EMPRESA"],
+    mobileNav: false,
+  },
+  {
+    to: "/auditoria", label: "Auditoria", icon: ShieldAlert,
+    papeis: ["ADMIN"],
     mobileNav: false,
   },
   {
@@ -132,7 +137,14 @@ function DesktopLayout({ children }: { children: React.ReactNode }) {
     (item) => usuario && item.papeis.includes(usuario.papel)
   );
 
-  const handleLogout = () => { logout(); navigate("/login"); };
+  const handleLogout = async () => {
+    try {
+      const { default: api } = await import("../../services/api");
+      await api.post("/api/v1/auth/logout");
+    } catch {}
+    logout();
+    navigate("/login");
+  };
 
   const inicial = usuario?.nome
     ?.split(" ")
@@ -290,7 +302,14 @@ function MobileLayout({ children }: { children: React.ReactNode }) {
   const mobileItens = itens.filter((i) => i.mobileNav);
   const extraItens  = itens.filter((i) => !i.mobileNav);
 
-  const handleLogout = () => { logout(); navigate("/login"); };
+  const handleLogout = async () => {
+    try {
+      const { default: api } = await import("../../services/api");
+      await api.post("/api/v1/auth/logout");
+    } catch {}
+    logout();
+    navigate("/login");
+  };
 
   const inicial = usuario?.nome
     ?.split(" ")
