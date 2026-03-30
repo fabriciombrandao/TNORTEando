@@ -7,6 +7,15 @@ const getAuditoria = (params: any) =>
   api.get("/api/v1/auditoria", { params }).then(r => r.data);
 
 const ACOES = ["", "LOGIN", "LOGIN_FALHA", "LOGOUT", "CREATE", "UPDATE", "DELETE"];
+
+const ACAO_LABEL: Record<string, string> = {
+  LOGIN:       "Login",
+  LOGIN_FALHA: "Falha de login",
+  LOGOUT:      "Logout",
+  CREATE:      "Criação",
+  UPDATE:      "Alteração",
+  DELETE:      "Exclusão",
+};
 const ENTIDADES = ["", "usuarios", "clientes", "contratos", "visitas", "agenda"];
 
 const BADGE: Record<string, string> = {
@@ -74,7 +83,7 @@ function LinhaAudit({ row }: { row: any }) {
         </td>
         <td className="px-4 py-3">
           <span className={`text-xs font-bold px-2 py-1 rounded-full ${BADGE[row.acao] || "bg-slate-100 text-slate-600"}`}>
-            {row.acao}
+            {ACAO_LABEL[row.acao] || row.acao}
           </span>
         </td>
         <td className="px-4 py-3 text-xs text-slate-500">{row.entidade || "—"}</td>
@@ -184,7 +193,7 @@ export default function AuditoriaPage() {
         <div className="flex flex-col gap-1">
           <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Ação</label>
           <select value={filtros.acao} onChange={e => setFiltros(f => ({...f, acao: e.target.value}))} className="input text-sm">
-            {ACOES.map(a => <option key={a} value={a}>{a || "Todas"}</option>)}
+            {ACOES.map(a => <option key={a} value={a}>{a ? (ACAO_LABEL[a] || a) : "Todas"}</option>)}
           </select>
         </div>
         <div className="flex flex-col gap-1">

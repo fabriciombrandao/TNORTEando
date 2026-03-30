@@ -214,7 +214,8 @@ async def listar_auditoria(
     where_sql = "WHERE " + " AND ".join(where) if where else ""
     res = await db.execute(sqlt(f"""
         SELECT id, usuario_id, usuario_nome, usuario_email, acao,
-               entidade, entidade_id, descricao, sucesso, ip, criado_em
+               entidade, entidade_id, descricao, sucesso, ip, criado_em,
+               valor_anterior, valor_novo
         FROM audit_log
         {where_sql}
         ORDER BY criado_em DESC
@@ -234,6 +235,8 @@ async def listar_auditoria(
             "sucesso": bool(r[8]),
             "ip": r[9],
             "criado_em": str(r[10]),
+            "valor_anterior": r[11] if r[11] else None,
+            "valor_novo": r[12] if r[12] else None,
         }
         for r in rows
     ]
@@ -451,6 +454,7 @@ async def editar_usuario(
         entidade="usuarios", entidade_id=str(usuario_id),
         descricao=f"Usuário atualizado: {antes.get('nome','')}",
         valor_anterior=antes, valor_novo=depois,
+        ip=request.client.host if request else None,
     )
     return {"ok": True}
 
