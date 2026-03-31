@@ -68,6 +68,8 @@ export default function ConfiguracoesPage() {
   const set = (key: string) => (v: number) => setForm(f => ({ ...f, [key]: v }));
 
   const [confirmarRegenar, setConfirmarRegenar] = useState(false);
+  const [regenerando, setRegenerando] = useState(false);
+  const [esnsParaRegerar, setEsnsParaRegerar] = useState<any[]>([]);
   const [expediente, setExpediente] = useState(
     DIAS.map((_, i) => ({
       dia_semana: i,
@@ -94,11 +96,19 @@ export default function ConfiguracoesPage() {
       qc.invalidateQueries({ queryKey: ["clientes"] });
       // Verificar se existem pré-agendas
       try {
-        const agendas = await api.get("/api/v1/agenda/lista", {
-          params: { mes: new Date().getMonth() + 1, ano: new Date().getFullYear() }
-        });
+        const mes = new Date().getMonth() + 1;
+        const ano = new Date().getFullYear();
+        const agendas = await api.get("/api/v1/agenda/lista", { params: { mes, ano } });
         const preAgendas = agendas.data.filter((a: any) => !a.publicada);
-        if (preAgendas.length > 0) setConfirmarRegenar(true);
+        if (preAgendas.length > 0) {
+          // Coletar ESNs únicos com pré-agendas
+          const esnsMap: Record<string, any> = {};
+          preAgendas.forEach((a: any) => {
+            esnsMap[a.vendedor_id] = { id: a.vendedor_id, nome: a.vendedor_nome, mes, ano };
+          });
+          setEsnsParaRegerar(Object.values(esnsMap));
+          setConfirmarRegenar(true);
+        }
       } catch {}
     },
     onError: () => toast.error("Erro ao salvar parâmetros."),
@@ -286,8 +296,28 @@ export default function ConfiguracoesPage() {
             <div className="flex gap-3">
               <button onClick={() => setConfirmarRegenar(false)}
                 className="btn-secondary btn-md flex-1">Não</button>
-              <button onClick={() => { setConfirmarRegenar(false); window.location.href = "/agenda"; }}
-                className="btn-primary btn-md flex-1">Sim</button>
+              <button disabled={regenerando} onClick={async () => {
+                setRegenerando(true);
+                try {
+                  const mes = new Date().getMonth() + 1;
+                  const ano = new Date().getFullYear();
+                  for (const esn of esnsParaRegerar) {
+                    // Excluir pré-agendas
+                    await api.delete("/api/v1/agenda/pre-agenda", { params: { esn_id: esn.id, mes, ano } });
+                    // Gerar novas
+                    const dataInicio = `${ano}-${String(mes).padStart(2,"0")}-01`;
+                    await api.post("/api/v1/agenda/gerar-ciclo", { esn_id: esn.id, data_inicio: dataInicio });
+                  }
+                  toast.success(`${esnsParaRegerar.length} agenda${esnsParaRegerar.length !== 1 ? "s" : ""} regenerada${esnsParaRegerar.length !== 1 ? "s" : ""}!`);
+                  setConfirmarRegenar(false);
+                  window.location.href = "/agenda";
+                } catch {
+                  toast.error("Erro ao regenerar agendas.");
+                } finally {
+                  setRegenerando(false);
+                }
+              }}
+                className="btn-primary btn-md flex-1">{regenerando ? "Regenerando..." : "Sim"}</button>
             </div>
           </div>
         </div>
