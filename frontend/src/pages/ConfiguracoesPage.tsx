@@ -279,6 +279,7 @@ export default function ConfiguracoesPage() {
       </div>
     </div>
 
+    <>
     {confirmarRegenar && (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
         <div className="w-full max-w-sm bg-white rounded-2xl p-6 shadow-xl">
@@ -293,5 +294,6 @@ export default function ConfiguracoesPage() {
         </div>
       </div>
     )}
+    </>
   );
 }
