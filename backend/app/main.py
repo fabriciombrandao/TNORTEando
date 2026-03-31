@@ -2477,30 +2477,59 @@ async def licenciamento_cliente(
 
 @router.get("/parametros", tags=["parametros"])
 async def get_parametros(
+    org_id: Optional[str] = None,
     current_user: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     from sqlalchemy import text as sqlt
-    res = await db.execute(sqlt("""
-        SELECT
-            COALESCE(mrr_cliente_a, 5000)       as mrr_cliente_a,
-            COALESCE(mrr_cliente_b, 1000)       as mrr_cliente_b,
-            COALESCE(mrr_cliente_c, 100)        as mrr_cliente_c,
-            COALESCE(meses_dormente, 18)        as meses_dormente,
-            COALESCE(visitas_por_dia_max, 8)    as visitas_por_dia_max,
-            COALESCE(raio_checkin_metros, 300)  as raio_checkin_metros,
-            COALESCE(frequencia_padrao_dias, 30) as frequencia_padrao_dias
-        FROM parametros_organizacao
-        JOIN organizacoes o ON o.id = organizacao_id
-        LIMIT 1
-    """))
-    row = res.fetchone()
-    if not row:
+    papel = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+
+    # ADMIN pode consultar qualquer organização
+    if papel == "ADMIN" and org_id:
+        filtro_org = ":org_id"
+        params = {"org_id": org_id}
+    else:
+        filtro_org = ":org_id"
+        params = {"org_id": str(current_user.organizacao_id) if current_user.organizacao_id else None}
+
+    if not params["org_id"]:
         return {
             "mrr_cliente_a": 5000.0, "mrr_cliente_b": 1000.0,
             "mrr_cliente_c": 100.0, "meses_dormente": 18,
             "visitas_por_dia_max": 8, "raio_checkin_metros": 300,
             "frequencia_padrao_dias": 30,
+            "freq_a_dias": 15, "freq_b_dias": 30, "freq_c_dias": 45,
+            "ciclo_dias": 45, "horizonte_dias": 30,
+        }
+
+    res = await db.execute(sqlt("""
+        SELECT
+            COALESCE(mrr_cliente_a, 5000)        as mrr_cliente_a,
+            COALESCE(mrr_cliente_b, 1000)        as mrr_cliente_b,
+            COALESCE(mrr_cliente_c, 100)         as mrr_cliente_c,
+            COALESCE(meses_dormente, 18)         as meses_dormente,
+            COALESCE(visitas_por_dia_max, 4)     as visitas_por_dia_max,
+            COALESCE(raio_checkin_metros, 300)   as raio_checkin_metros,
+            COALESCE(frequencia_padrao_dias, 30) as frequencia_padrao_dias,
+            COALESCE(freq_a_dias, 15)            as freq_a_dias,
+            COALESCE(freq_b_dias, 30)            as freq_b_dias,
+            COALESCE(freq_c_dias, 45)            as freq_c_dias,
+            COALESCE(ciclo_dias, 45)             as ciclo_dias,
+            COALESCE(horizonte_dias, 30)         as horizonte_dias,
+            organizacao_id
+        FROM parametros_organizacao
+        WHERE organizacao_id = :org_id
+        LIMIT 1
+    """), params)
+    row = res.fetchone()
+    if not row:
+        return {
+            "mrr_cliente_a": 5000.0, "mrr_cliente_b": 1000.0,
+            "mrr_cliente_c": 100.0, "meses_dormente": 18,
+            "visitas_por_dia_max": 4, "raio_checkin_metros": 300,
+            "frequencia_padrao_dias": 30,
+            "freq_a_dias": 15, "freq_b_dias": 30, "freq_c_dias": 45,
+            "ciclo_dias": 45, "horizonte_dias": 30,
         }
     return {
         "mrr_cliente_a": float(row[0]),
@@ -2510,6 +2539,12 @@ async def get_parametros(
         "visitas_por_dia_max": int(row[4]),
         "raio_checkin_metros": int(row[5]),
         "frequencia_padrao_dias": int(row[6]),
+        "freq_a_dias": int(row[7]),
+        "freq_b_dias": int(row[8]),
+        "freq_c_dias": int(row[9]),
+        "ciclo_dias": int(row[10]),
+        "horizonte_dias": int(row[11]),
+        "organizacao_id": str(row[12]) if row[12] else None,
     }
 
 @router.put("/parametros", tags=["parametros"])
@@ -2518,8 +2553,9 @@ async def salvar_parametros(
     current_user: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if current_user.papel != PapelUsuario.GESTOR_EMPRESA:
-        raise HTTPException(status_code=403, detail="Apenas o gestor pode alterar parâmetros.")
+    papel = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+    if papel not in ("ADMIN", "GESTOR_EMPRESA"):
+        raise HTTPException(status_code=403, detail="Sem permissão para alterar parâmetros.")
 
     from sqlalchemy import text as sqlt
 
@@ -2534,7 +2570,7 @@ async def salvar_parametros(
             raio_checkin_metros = :rc,
             frequencia_padrao_dias = :fp,
             atualizado_em       = now()
-        WHERE organizacao_id = (SELECT id FROM organizacoes LIMIT 1)
+        WHERE organizacao_id = :org_current
     """), {
         "a":  body.get("mrr_cliente_a", 5000),
         "b":  body.get("mrr_cliente_b", 1000),
@@ -2543,6 +2579,7 @@ async def salvar_parametros(
         "vd": body.get("visitas_por_dia_max", 8),
         "rc": body.get("raio_checkin_metros", 300),
         "fp": body.get("frequencia_padrao_dias", 30),
+        "org_current": str(current_user.organizacao_id) if current_user.organizacao_id else None,
     })
 
     # Recalcular classificação ABC e dormentes

@@ -44,9 +44,14 @@ export default function ConfiguracoesPage() {
     mrr_cliente_b: 1000,
     mrr_cliente_c: 100,
     meses_dormente: 18,
-    visitas_por_dia_max: 8,
+    visitas_por_dia_max: 4,
     raio_checkin_metros: 300,
     frequencia_padrao_dias: 30,
+    freq_a_dias: 15,
+    freq_b_dias: 30,
+    freq_c_dias: 45,
+    ciclo_dias: 45,
+    horizonte_dias: 30,
   });
 
   useEffect(() => {
@@ -125,6 +130,40 @@ export default function ConfiguracoesPage() {
               suffix="metros" value={form.raio_checkin_metros} onChange={set("raio_checkin_metros")} />
             <Campo label="Frequência padrão" desc="Dias padrão entre visitas quando não há regra específica"
               suffix="dias" value={form.frequencia_padrao_dias} onChange={set("frequencia_padrao_dias")} />
+          </div>
+        </div>
+
+        {/* Frequência por ABC */}
+        <div className="card">
+          <div className="card-header">
+            <span className="text-sm font-semibold text-slate-900">Frequência de Visitas por Classificação</span>
+          </div>
+          <div className="card-body">
+            <p className="text-xs text-slate-400 mb-3">
+              Intervalo em dias entre visitas conforme a classificação ABC do cliente.
+            </p>
+            <Campo label="Classe A" desc="Visitar a cada X dias"
+              suffix="dias" value={form.freq_a_dias} onChange={set("freq_a_dias")} />
+            <Campo label="Classe B" desc="Visitar a cada X dias"
+              suffix="dias" value={form.freq_b_dias} onChange={set("freq_b_dias")} />
+            <Campo label="Classe C" desc="Visitar a cada X dias"
+              suffix="dias" value={form.freq_c_dias} onChange={set("freq_c_dias")} />
+          </div>
+        </div>
+
+        {/* Ciclo e horizonte */}
+        <div className="card">
+          <div className="card-header">
+            <span className="text-sm font-semibold text-slate-900">Ciclo e Geração de Agenda</span>
+          </div>
+          <div className="card-body">
+            <p className="text-xs text-slate-400 mb-3">
+              Parâmetros para geração automática da agenda de visitas.
+            </p>
+            <Campo label="Ciclo de visitas" desc="Prazo máximo para visitar toda a carteira"
+              suffix="dias" value={form.ciclo_dias} onChange={set("ciclo_dias")} />
+            <Campo label="Horizonte da agenda" desc="Quantos dias à frente gerar a agenda"
+              suffix="dias" value={form.horizonte_dias} onChange={set("horizonte_dias")} />
           </div>
         </div>
 
