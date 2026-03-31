@@ -32,6 +32,25 @@ function Campo({ label, desc, value, onChange, prefix = "", suffix = "" }: {
         {suffix && <span className="text-xs text-slate-400">{suffix}</span>}
       </div>
     </div>
+
+      {/* Modal confirmar regeneração */}
+      {confirmarRegenar && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-sm bg-white rounded-2xl p-6 shadow-xl">
+            <p className="font-bold text-slate-900 mb-2">Regenerar pré-agendas?</p>
+            <p className="text-sm text-slate-500 mb-5">Existem pré-agendas geradas. Deseja gerá-las novamente com os novos parâmetros?</p>
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmarRegenar(false)}
+                className="btn-secondary btn-md flex-1">Não</button>
+              <button onClick={async () => {
+                setConfirmarRegenar(false);
+                // Navegar para agenda
+                window.location.href = "/agenda";
+              }} className="btn-primary btn-md flex-1">Sim</button>
+            </div>
+          </div>
+        </div>
+      )}
   );
 }
 
@@ -66,6 +85,7 @@ export default function ConfiguracoesPage() {
 
   const set = (key: string) => (v: number) => setForm(f => ({ ...f, [key]: v }));
 
+  const [confirmarRegenar, setConfirmarRegenar] = useState(false);
   const [expediente, setExpediente] = useState(
     DIAS.map((_, i) => ({
       dia_semana: i,
@@ -86,10 +106,18 @@ export default function ConfiguracoesPage() {
 
   const mut = useMutation({
     mutationFn: () => salvarParametros(form),
-    onSuccess: (res) => {
+    onSuccess: async (res) => {
       toast.success(res.mensagem || "Parâmetros salvos!");
       qc.invalidateQueries({ queryKey: ["parametros"] });
       qc.invalidateQueries({ queryKey: ["clientes"] });
+      // Verificar se existem pré-agendas
+      try {
+        const agendas = await api.get("/api/v1/agenda/lista", {
+          params: { mes: new Date().getMonth() + 1, ano: new Date().getFullYear() }
+        });
+        const preAgendas = agendas.data.filter((a: any) => !a.publicada);
+        if (preAgendas.length > 0) setConfirmarRegenar(true);
+      } catch {}
     },
     onError: () => toast.error("Erro ao salvar parâmetros."),
   });
@@ -268,5 +296,24 @@ export default function ConfiguracoesPage() {
 
       </div>
     </div>
+
+      {/* Modal confirmar regeneração */}
+      {confirmarRegenar && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-sm bg-white rounded-2xl p-6 shadow-xl">
+            <p className="font-bold text-slate-900 mb-2">Regenerar pré-agendas?</p>
+            <p className="text-sm text-slate-500 mb-5">Existem pré-agendas geradas. Deseja gerá-las novamente com os novos parâmetros?</p>
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmarRegenar(false)}
+                className="btn-secondary btn-md flex-1">Não</button>
+              <button onClick={async () => {
+                setConfirmarRegenar(false);
+                // Navegar para agenda
+                window.location.href = "/agenda";
+              }} className="btn-primary btn-md flex-1">Sim</button>
+            </div>
+          </div>
+        </div>
+      )}
   );
 }

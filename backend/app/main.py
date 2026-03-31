@@ -3093,8 +3093,6 @@ async def salvar_parametros(
             visitas_por_dia_max = :vd,
             raio_checkin_metros = :rc,
             frequencia_padrao_dias = :fp,
-            horario_inicio       = CAST(:hi AS time),
-            horario_fim          = CAST(:hf AS time),
             duracao_padrao_min   = :dp,
             intervalo_entre_visitas_min = :iv,
             atualizado_em       = now()
