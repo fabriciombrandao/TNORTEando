@@ -19,7 +19,7 @@ const NAV_ITEMS = [
   },
   {
     to: "/agenda", label: "Agenda", icon: CalendarDays,
-    papeis: ["ESN", "CS"],
+    papeis: ["ADMIN", "GESTOR_EMPRESA", "DSN", "GSN", "CS", "ESN"],
     mobileNav: true,
   },
   {
