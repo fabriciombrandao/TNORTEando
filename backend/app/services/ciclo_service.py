@@ -1,13 +1,13 @@
 """
 ciclo_service.py
 Geração automática de agenda baseada no ciclo ABC de visitas.
+Respeita expediente semanal (manhã/tarde com intervalo de almoço).
 """
 import random
-from datetime import date, timedelta
-from typing import List, Dict, Any
+from datetime import date, timedelta, time
+from typing import List, Dict, Any, Set
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text as sqlt
-import json
 
 
 async def get_parametros(
@@ -16,11 +16,6 @@ async def get_parametros(
     gsn_id: str,
     org_id: str,
 ) -> Dict[str, Any]:
-    """
-    Retorna parâmetros efetivos para um ESN.
-    Prioridade: ESN > GSN > Organização > defaults
-    """
-    # Buscar parâmetros da organização
     res = await db.execute(sqlt("""
         SELECT
             COALESCE(freq_a_dias, 15)            as freq_a_dias,
@@ -31,7 +26,9 @@ async def get_parametros(
             COALESCE(horizonte_dias, 30)         as horizonte_dias,
             COALESCE(frequencia_padrao_dias, 30) as freq_padrao,
             COALESCE(agrupar_por_municipio, true) as agrupar_municipio,
-            COALESCE(max_municipios_por_dia, 1)  as max_municipios
+            COALESCE(max_municipios_por_dia, 1)  as max_municipios,
+            COALESCE(duracao_padrao_min, 45)     as duracao_min,
+            COALESCE(intervalo_entre_visitas_min, 15) as intervalo_min
         FROM parametros_organizacao
         WHERE organizacao_id = :org_id
         LIMIT 1
@@ -49,24 +46,102 @@ async def get_parametros(
             "freq_padrao": int(row[6]),
             "agrupar_municipio": bool(row[7]),
             "max_municipios": int(row[8]),
+            "duracao_min": int(row[9]),
+            "intervalo_min": int(row[10]),
         }
 
     return {
         "freq_a_dias": 15, "freq_b_dias": 30, "freq_c_dias": 45,
         "ciclo_dias": 45, "visitas_por_dia": 4, "horizonte_dias": 30,
         "freq_padrao": 30, "agrupar_municipio": True, "max_municipios": 1,
+        "duracao_min": 45, "intervalo_min": 15,
     }
 
 
-def _proximo_dia_util(data: date, feriados: set) -> date:
+async def get_expediente(db: AsyncSession, org_id: str) -> Dict[int, Dict]:
+    """Retorna expediente semanal indexado por dia_semana (0=dom..6=sab)."""
+    res = await db.execute(sqlt("""
+        SELECT dia_semana, ativo,
+               manha_inicio, manha_fim,
+               tarde_inicio, tarde_fim
+        FROM expediente_semanal
+        WHERE organizacao_id = :org_id
+        ORDER BY dia_semana
+    """), {"org_id": org_id})
+    rows = res.fetchall()
+
+    expediente = {}
+    for r in rows:
+        expediente[r[0]] = {
+            "ativo": bool(r[1]),
+            "manha_inicio": r[2],
+            "manha_fim": r[3],
+            "tarde_inicio": r[4],
+            "tarde_fim": r[5],
+        }
+
+    # Defaults se não configurado
+    if not expediente:
+        for i in range(7):
+            expediente[i] = {
+                "ativo": 1 <= i <= 5,
+                "manha_inicio": time(8, 0),
+                "manha_fim": time(12, 0),
+                "tarde_inicio": time(14, 0),
+                "tarde_fim": time(18, 0),
+            }
+
+    return expediente
+
+
+def _slots_disponiveis(expediente_dia: Dict, duracao_min: int, intervalo_min: int) -> List[str]:
+    """Calcula slots de horário disponíveis em um dia considerando manhã e tarde."""
+    if not expediente_dia.get("ativo", False):
+        return []
+
+    slots = []
+    slot_min = duracao_min + intervalo_min
+
+    def slots_turno(inicio: time, fim: time) -> List[str]:
+        turno_slots = []
+        atual = inicio.hour * 60 + inicio.minute
+        fim_min = fim.hour * 60 + fim.minute
+        while atual + duracao_min <= fim_min:
+            h, m = divmod(atual, 60)
+            turno_slots.append(f"{h:02d}:{m:02d}")
+            atual += slot_min
+        return turno_slots
+
+    mi = expediente_dia["manha_inicio"]
+    mf = expediente_dia["manha_fim"]
+    ti = expediente_dia["tarde_inicio"]
+    tf = expediente_dia["tarde_fim"]
+
+    if mi and mf:
+        slots.extend(slots_turno(mi, mf))
+    if ti and tf:
+        slots.extend(slots_turno(ti, tf))
+
+    return slots
+
+
+def _is_dia_util(data: date, feriados: Set[date], expediente: Dict) -> bool:
+    """Verifica se o dia é útil (não é feriado e está no expediente ativo)."""
+    if data in feriados:
+        return False
+    dia_semana = data.isoweekday() % 7  # 0=dom, 1=seg, ..., 6=sab
+    exp = expediente.get(dia_semana, {})
+    return bool(exp.get("ativo", False))
+
+
+def _proximo_dia_util(data: date, feriados: Set[date], expediente: Dict) -> date:
     """Retorna o próximo dia útil a partir de data (inclusive)."""
-    while data.weekday() >= 5 or data in feriados:
+    while not _is_dia_util(data, feriados, expediente):
         data += timedelta(days=1)
     return data
 
 
-def _get_feriados(ano: int, uf: str = "TO") -> set:
-    """Retorna conjunto de feriados para o ano/UF usando biblioteca holidays."""
+def _get_feriados(ano: int, uf: str = "TO") -> Set[date]:
     try:
         import holidays as hol
         br = hol.Brazil(state=uf, years=ano)
@@ -75,57 +150,33 @@ def _get_feriados(ano: int, uf: str = "TO") -> set:
         return set()
 
 
-def _calcular_proxima_visita(
-    cliente: dict,
-    params: dict,
-    data_base: date,
-) -> date:
-    """
-    Calcula a data da próxima visita para um cliente.
-    Prioridade:
-    1. proxima_visita_prevista do cliente
-    2. ultima_visita_em + frequencia_visita_dias do cliente
-    3. ultima_visita_em + frequência por ABC dos parâmetros
-    4. data_base (nunca visitado)
-    """
-    # 1. Próxima visita prevista definida no checkout
+def _calcular_proxima_visita(cliente: dict, params: dict, data_base: date) -> date:
     if cliente.get("proxima_visita_prevista"):
         try:
-            data = date.fromisoformat(str(cliente["proxima_visita_prevista"]))
-            if data >= data_base:
-                return data
+            d = date.fromisoformat(str(cliente["proxima_visita_prevista"]))
+            if d >= data_base:
+                return d
         except (ValueError, TypeError):
             pass
 
     ultima = cliente.get("ultima_visita_em")
+    ultima_date = None
     if ultima:
         try:
             ultima_date = date.fromisoformat(str(ultima)[:10])
         except (ValueError, TypeError):
-            ultima_date = None
-    else:
-        ultima_date = None
+            pass
 
-    # 2. Frequência específica do cliente
     freq_cliente = cliente.get("frequencia_visita_dias")
     if freq_cliente and ultima_date:
-        proxima = ultima_date + timedelta(days=int(freq_cliente))
-        return max(proxima, data_base)
+        return max(ultima_date + timedelta(days=int(freq_cliente)), data_base)
 
-    # 3. Frequência por ABC
     abc = (cliente.get("classificacao_abc") or "C").upper()
-    if abc == "A":
-        freq = params["freq_a_dias"]
-    elif abc == "B":
-        freq = params["freq_b_dias"]
-    else:
-        freq = params["freq_c_dias"]
+    freq = {"A": params["freq_a_dias"], "B": params["freq_b_dias"]}.get(abc, params["freq_c_dias"])
 
     if ultima_date:
-        proxima = ultima_date + timedelta(days=freq)
-        return max(proxima, data_base)
+        return max(ultima_date + timedelta(days=freq), data_base)
 
-    # 4. Nunca visitado — usar data_base
     return data_base
 
 
@@ -137,20 +188,15 @@ async def gerar_agenda_ciclo(
     uf_esn: str,
     data_inicio: date,
 ) -> List[Dict[str, Any]]:
-    """
-    Gera a agenda para um ESN baseada no ciclo ABC.
-    Retorna lista de {data, cliente_id, ordem, municipio}.
-    """
     params = await get_parametros(db, esn_id, gsn_id, org_id)
-
+    expediente = await get_expediente(db, org_id)
     data_fim = data_inicio + timedelta(days=params["horizonte_dias"])
 
-    # Buscar feriados do período
-    feriados = _get_feriados(data_inicio.year, uf_esn)
+    # Feriados
+    feriados: Set[date] = _get_feriados(data_inicio.year, uf_esn)
     if data_fim.year != data_inicio.year:
         feriados |= _get_feriados(data_fim.year, uf_esn)
 
-    # Buscar feriados municipais cadastrados
     res_fer = await db.execute(sqlt("""
         SELECT dia, mes, ano FROM feriados
         WHERE ativo = true AND (uf = :uf OR uf IS NULL)
@@ -159,21 +205,18 @@ async def gerar_agenda_ciclo(
         try:
             ano_fer = r[2] if r[2] else data_inicio.year
             feriados.add(date(ano_fer, r[1], r[0]))
-            if not r[2]:  # recorrente — adicionar para ambos os anos
+            if not r[2]:
                 feriados.add(date(data_fim.year, r[1], r[0]))
         except (ValueError, TypeError):
             pass
 
-    # Buscar clientes do ESN com dados necessários
+    # Clientes do ESN
     res = await db.execute(sqlt("""
-        SELECT
-            c.id, c.razao_social, c.municipio, c.uf,
-            c.classificacao_abc, c.frequencia_visita_dias,
-            c.ultima_visita_em, c.proxima_visita_prevista,
-            c.lat, c.lng
+        SELECT c.id, c.razao_social, c.municipio, c.uf,
+               c.classificacao_abc, c.frequencia_visita_dias,
+               c.ultima_visita_em, c.proxima_visita_prevista
         FROM clientes c
-        WHERE c.vendedor_responsavel_id = :esn_id
-          AND c.ativo = true
+        WHERE c.vendedor_responsavel_id = :esn_id AND c.ativo = true
         ORDER BY c.classificacao_abc, c.razao_social
     """), {"esn_id": esn_id})
     clientes = [
@@ -181,7 +224,6 @@ async def gerar_agenda_ciclo(
             "id": str(r[0]), "razao_social": r[1], "municipio": r[2], "uf": r[3],
             "classificacao_abc": r[4], "frequencia_visita_dias": r[5],
             "ultima_visita_em": r[6], "proxima_visita_prevista": r[7],
-            "lat": r[8], "lng": r[9],
         }
         for r in res.fetchall()
     ]
@@ -189,7 +231,7 @@ async def gerar_agenda_ciclo(
     if not clientes:
         return []
 
-    # Calcular próxima visita para cada cliente
+    # Calcular próxima visita necessária
     visitas_necessarias = []
     for c in clientes:
         proxima = _calcular_proxima_visita(c, params, data_inicio)
@@ -199,14 +241,10 @@ async def gerar_agenda_ciclo(
                 "municipio": c["municipio"] or "",
                 "proxima": proxima,
                 "abc": c["classificacao_abc"] or "C",
-                "razao_social": c["razao_social"],
             })
 
-    # Ordenar por urgência (mais atrasados primeiro)
-    # Dentro do mesmo dia de urgência, embaralhar para variar a sequência mês a mês
+    # Ordenar por urgência e embaralhar dentro do mesmo dia
     visitas_necessarias.sort(key=lambda x: x["proxima"])
-    
-    # Embaralhar clientes com mesma data de próxima visita para variar sequência
     from itertools import groupby
     grupos = []
     for data_prox, grupo in groupby(visitas_necessarias, key=lambda x: x["proxima"]):
@@ -215,16 +253,13 @@ async def gerar_agenda_ciclo(
         grupos.extend(g)
     visitas_necessarias = grupos
 
-    # Distribuir nos dias úteis
-    # Mapa: data -> lista de visitas agendadas
+    # Distribuir nos dias úteis respeitando expediente
     agenda: Dict[date, List[dict]] = {}
     municipios_por_dia: Dict[date, set] = {}
 
     for visita in visitas_necessarias:
-        # Encontrar o dia disponível a partir da data necessária
-        dia_candidato = _proximo_dia_util(visita["proxima"], feriados)
+        dia_candidato = _proximo_dia_util(visita["proxima"], feriados, expediente)
 
-        # Tentar encaixar respeitando limites
         tentativas = 0
         while tentativas < params["horizonte_dias"]:
             if dia_candidato > data_fim:
@@ -233,31 +268,38 @@ async def gerar_agenda_ciclo(
             visitas_do_dia = agenda.get(dia_candidato, [])
             municipios_do_dia = municipios_por_dia.get(dia_candidato, set())
 
-            # Verificar limite de visitas por dia
-            if len(visitas_do_dia) >= params["visitas_por_dia"]:
-                dia_candidato = _proximo_dia_util(dia_candidato + timedelta(days=1), feriados)
+            # Verificar slots disponíveis no expediente
+            dia_semana = dia_candidato.isoweekday() % 7
+            exp_dia = expediente.get(dia_semana, {})
+            slots = _slots_disponiveis(exp_dia, params["duracao_min"], params["intervalo_min"])
+
+            max_visitas = min(params["visitas_por_dia"], len(slots))
+            if len(visitas_do_dia) >= max_visitas:
+                dia_candidato = _proximo_dia_util(dia_candidato + timedelta(days=1), feriados, expediente)
                 tentativas += 1
                 continue
 
-            # Verificar agrupamento por município
             mun = visita["municipio"]
             if params["agrupar_municipio"] and mun:
                 if len(municipios_do_dia) >= params["max_municipios"] and mun not in municipios_do_dia:
-                    dia_candidato = _proximo_dia_util(dia_candidato + timedelta(days=1), feriados)
+                    dia_candidato = _proximo_dia_util(dia_candidato + timedelta(days=1), feriados, expediente)
                     tentativas += 1
                     continue
 
-            # Encaixar a visita
             if dia_candidato not in agenda:
                 agenda[dia_candidato] = []
                 municipios_por_dia[dia_candidato] = set()
 
-            agenda[dia_candidato].append(visita)
+            # Atribuir horário do slot correspondente
+            idx = len(agenda[dia_candidato])
+            horario = slots[idx] if idx < len(slots) else None
+
+            agenda[dia_candidato].append({**visita, "horario": horario})
             if mun:
                 municipios_por_dia[dia_candidato].add(mun)
             break
 
-    # Montar resultado ordenado
+    # Montar resultado
     resultado = []
     for dia in sorted(agenda.keys()):
         for idx, visita in enumerate(agenda[dia]):
@@ -267,6 +309,7 @@ async def gerar_agenda_ciclo(
                 "municipio": visita["municipio"],
                 "ordem": idx + 1,
                 "abc": visita["abc"],
+                "horario": visita.get("horario"),
             })
 
     return resultado

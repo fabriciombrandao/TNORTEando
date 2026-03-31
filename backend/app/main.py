@@ -1328,14 +1328,15 @@ async def gerar_agenda_ciclo(
 
         for item in itens:
             await db.execute(sqlt("""
-                INSERT INTO agenda_itens (id, agenda_id, cliente_id, ordem, status)
-                VALUES (:id, :ag, :cli, :ord, 'PENDENTE')
-                ON CONFLICT DO NOTHING
+                INSERT INTO agenda_itens (id, agenda_id, cliente_id, ordem, status, horario_previsto)
+                VALUES (:id, :ag, :cli, :ord, 'PENDENTE', :h)
+                ON CONFLICT (agenda_id, cliente_id) DO NOTHING
             """), {
                 "id": str(uuid.uuid4()),
                 "ag": ag_id,
                 "cli": item["cliente_id"],
                 "ord": item["ordem"],
+                "h": item.get("horario"),
             })
             criados += 1
 
@@ -1575,19 +1576,20 @@ async def publicar_todas_agendas(
     org_row = res_org.fetchone()
     org_id = str(org_row[0]) if org_row else None
 
-    horario_inicio = "08:00"
+    from app.services.ciclo_service import get_expediente as _get_exp
     duracao_min = 45
     intervalo_min = 15
+    expediente_org = {}
     if org_id:
         res_p = await db.execute(sqlt("""
-            SELECT horario_inicio::text, duracao_padrao_min, intervalo_entre_visitas_min
+            SELECT duracao_padrao_min, intervalo_entre_visitas_min
             FROM parametros_organizacao WHERE organizacao_id = :org LIMIT 1
         """), {"org": org_id})
         p_row = res_p.fetchone()
         if p_row:
-            horario_inicio = str(p_row[0])[:5] if p_row[0] else "08:00"
-            duracao_min = int(p_row[1]) if p_row[1] else 45
-            intervalo_min = int(p_row[2]) if p_row[2] else 15
+            duracao_min = int(p_row[0]) if p_row[0] else 45
+            intervalo_min = int(p_row[1]) if p_row[1] else 15
+        expediente_org = await _get_exp(db, org_id)
 
     # Buscar pré-agendas do ESN no mês
     res = await db.execute(sqlt("""
@@ -1604,11 +1606,20 @@ async def publicar_todas_agendas(
     if not agenda_ids:
         return {"ok": True, "publicadas": 0, "mensagem": "Nenhuma pré-agenda encontrada."}
 
-    hora_inicio_h, hora_inicio_m = map(int, horario_inicio.split(":"))
-    slot_min = duracao_min + intervalo_min
+    from app.services.ciclo_service import _slots_disponiveis
 
     for ag_id in agenda_ids:
-        # Calcular horários para os itens deste dia
+        # Buscar dia da agenda para saber o expediente
+        res_dia = await db.execute(sqlt("SELECT data FROM agendas WHERE id = :id"), {"id": ag_id})
+        dia_row = res_dia.fetchone()
+        slots = []
+        if dia_row and expediente_org:
+            from datetime import date as _date2
+            dia_data = dia_row[0] if isinstance(dia_row[0], _date2) else _date2.fromisoformat(str(dia_row[0]))
+            dia_semana = dia_data.isoweekday() % 7
+            exp_dia = expediente_org.get(dia_semana, {})
+            slots = _slots_disponiveis(exp_dia, duracao_min, intervalo_min)
+
         res_itens = await db.execute(sqlt("""
             SELECT id, ordem FROM agenda_itens
             WHERE agenda_id = :ag_id AND status != 'CANCELADO'
@@ -1617,14 +1628,12 @@ async def publicar_todas_agendas(
         itens = res_itens.fetchall()
 
         for i, item in enumerate(itens):
-            total_min = hora_inicio_h * 60 + hora_inicio_m + i * slot_min
-            h = total_min // 60
-            m = total_min % 60
-            horario = f"{h:02d}:{m:02d}"
-            await db.execute(sqlt("""
-                UPDATE agenda_itens SET horario_previsto = :h
-                WHERE id = :id AND (horario_previsto IS NULL OR horario_previsto = '')
-            """), {"h": horario, "id": str(item[0])})
+            horario = slots[i] if i < len(slots) else None
+            if horario:
+                await db.execute(sqlt("""
+                    UPDATE agenda_itens SET horario_previsto = :h
+                    WHERE id = :id AND (horario_previsto IS NULL OR horario_previsto = '')
+                """), {"h": horario, "id": str(item[0])})
 
         # Publicar a agenda
         await db.execute(sqlt("""
