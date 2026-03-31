@@ -1820,6 +1820,93 @@ async def remover_item_agenda(
 
 
 # ─────────────────────────────────────────────
+# Expediente Semanal
+# ─────────────────────────────────────────────
+
+DIAS_SEMANA = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"]
+
+@router.get("/expediente", tags=["parametros"])
+async def get_expediente(
+    org_id: Optional[str] = None,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import text as sqlt
+    papel = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+    oid = org_id if papel == "ADMIN" and org_id else str(current_user.organizacao_id) if current_user.organizacao_id else None
+    if not oid:
+        raise HTTPException(status_code=400, detail="Organização não encontrada.")
+
+    res = await db.execute(sqlt("""
+        SELECT dia_semana, ativo, 
+               manha_inicio::text, manha_fim::text,
+               tarde_inicio::text, tarde_fim::text
+        FROM expediente_semanal
+        WHERE organizacao_id = :org
+        ORDER BY dia_semana
+    """), {"org": oid})
+    rows = res.fetchall()
+    return [
+        {
+            "dia_semana": r[0],
+            "dia_nome": DIAS_SEMANA[r[0]],
+            "ativo": bool(r[1]),
+            "manha_inicio": str(r[2])[:5] if r[2] else "08:00",
+            "manha_fim": str(r[3])[:5] if r[3] else "12:00",
+            "tarde_inicio": str(r[4])[:5] if r[4] else "14:00",
+            "tarde_fim": str(r[5])[:5] if r[5] else "18:00",
+        }
+        for r in rows
+    ]
+
+
+@router.put("/expediente", tags=["parametros"])
+async def salvar_expediente(
+    body: dict,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import text as sqlt
+    from datetime import time as time_type
+    papel = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+    if papel not in ("ADMIN", "GESTOR_EMPRESA"):
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+
+    org_id = str(current_user.organizacao_id) if current_user.organizacao_id else None
+    if not org_id:
+        raise HTTPException(status_code=400, detail="Organização não encontrada.")
+
+    dias = body.get("dias", [])
+    for dia in dias:
+        def to_time(s: str):
+            h, m = map(int, (s or "08:00").split(":"))
+            return time_type(h, m)
+
+        await db.execute(sqlt("""
+            INSERT INTO expediente_semanal 
+                (organizacao_id, dia_semana, ativo, manha_inicio, manha_fim, tarde_inicio, tarde_fim)
+            VALUES (:org, :dia, :ativo, :mi, :mf, :ti, :tf)
+            ON CONFLICT (organizacao_id, dia_semana) DO UPDATE SET
+                ativo = EXCLUDED.ativo,
+                manha_inicio = EXCLUDED.manha_inicio,
+                manha_fim = EXCLUDED.manha_fim,
+                tarde_inicio = EXCLUDED.tarde_inicio,
+                tarde_fim = EXCLUDED.tarde_fim
+        """), {
+            "org": org_id,
+            "dia": int(dia["dia_semana"]),
+            "ativo": bool(dia.get("ativo", True)),
+            "mi": to_time(dia.get("manha_inicio", "08:00")),
+            "mf": to_time(dia.get("manha_fim", "12:00")),
+            "ti": to_time(dia.get("tarde_inicio", "14:00")),
+            "tf": to_time(dia.get("tarde_fim", "18:00")),
+        })
+
+    await db.commit()
+    return {"ok": True, "mensagem": "Expediente salvo com sucesso."}
+
+
+# ─────────────────────────────────────────────
 # Cadastros Auxiliares
 # ─────────────────────────────────────────────
 
@@ -2931,7 +3018,6 @@ async def get_parametros(
             "frequencia_padrao_dias": 30,
             "freq_a_dias": 15, "freq_b_dias": 30, "freq_c_dias": 45,
             "ciclo_dias": 45, "horizonte_dias": 30,
-            "horario_inicio": "08:00", "horario_fim": "18:00",
             "duracao_padrao_min": 45, "intervalo_min": 15,
         }
 
@@ -2949,8 +3035,6 @@ async def get_parametros(
             COALESCE(freq_c_dias, 45)            as freq_c_dias,
             COALESCE(ciclo_dias, 45)             as ciclo_dias,
             COALESCE(horizonte_dias, 30)         as horizonte_dias,
-            COALESCE(horario_inicio::text, '08:00') as horario_inicio,
-            COALESCE(horario_fim::text, '18:00')    as horario_fim,
             COALESCE(duracao_padrao_min, 45)     as duracao_padrao_min,
             COALESCE(intervalo_entre_visitas_min, 15) as intervalo_min,
             organizacao_id
@@ -2967,7 +3051,6 @@ async def get_parametros(
             "frequencia_padrao_dias": 30,
             "freq_a_dias": 15, "freq_b_dias": 30, "freq_c_dias": 45,
             "ciclo_dias": 45, "horizonte_dias": 30,
-            "horario_inicio": "08:00", "horario_fim": "18:00",
             "duracao_padrao_min": 45, "intervalo_min": 15,
         }
     return {
@@ -2983,11 +3066,9 @@ async def get_parametros(
         "freq_c_dias": int(row[9]),
         "ciclo_dias": int(row[10]),
         "horizonte_dias": int(row[11]),
-        "horario_inicio": str(row[12])[:5] if row[12] else "08:00",
-        "horario_fim": str(row[13])[:5] if row[13] else "18:00",
-        "duracao_padrao_min": int(row[14]) if row[14] else 45,
-        "intervalo_min": int(row[15]) if row[15] else 15,
-        "organizacao_id": str(row[16]) if row[16] else None,
+        "duracao_padrao_min": int(row[12]) if row[12] else 45,
+        "intervalo_min": int(row[13]) if row[13] else 15,
+        "organizacao_id": str(row[14]) if row[14] else None,
     }
 
 @router.put("/parametros", tags=["parametros"])
@@ -3026,8 +3107,6 @@ async def salvar_parametros(
         "vd": body.get("visitas_por_dia_max", 8),
         "rc": body.get("raio_checkin_metros", 300),
         "fp": body.get("frequencia_padrao_dias", 30),
-        "hi": __import__('datetime').time(*map(int, body.get("horario_inicio", "08:00").split(':'))),
-        "hf": __import__('datetime').time(*map(int, body.get("horario_fim", "18:00").split(':'))),
         "dp": body.get("duracao_padrao_min", 45),
         "iv": body.get("intervalo_min", 15),
         "org_current": str(current_user.organizacao_id) if current_user.organizacao_id else None,

@@ -5,6 +5,10 @@ import toast from "react-hot-toast";
 import { Save, RefreshCw } from "lucide-react";
 
 const getParametros  = () => api.get("/api/v1/parametros").then(r => r.data);
+const getExpediente  = () => api.get("/api/v1/expediente").then(r => r.data);
+const salvarExpediente = (data: any) => api.put("/api/v1/expediente", data).then(r => r.data);
+
+const DIAS = ["Domingo","Segunda","Terça","Quarta","Quinta","Sexta","Sábado"];
 const salvarParametros = (data: any) => api.put("/api/v1/parametros", data).then(r => r.data);
 
 function Campo({ label, desc, value, onChange, prefix = "", suffix = "" }: {
@@ -52,8 +56,6 @@ export default function ConfiguracoesPage() {
     freq_c_dias: 45,
     ciclo_dias: 45,
     horizonte_dias: 30,
-    horario_inicio: "08:00",
-    horario_fim: "18:00",
     duracao_padrao_min: 45,
     intervalo_min: 15,
   });
@@ -63,6 +65,24 @@ export default function ConfiguracoesPage() {
   }, [data]);
 
   const set = (key: string) => (v: number) => setForm(f => ({ ...f, [key]: v }));
+
+  const [expediente, setExpediente] = useState(
+    DIAS.map((_, i) => ({
+      dia_semana: i,
+      ativo: i >= 1 && i <= 5,
+      manha_inicio: "08:00", manha_fim: "12:00",
+      tarde_inicio: "14:00", tarde_fim: "18:00",
+    }))
+  );
+
+  const { data: expedienteData } = useQuery({ queryKey: ["expediente"], queryFn: getExpediente });
+  useEffect(() => { if (expedienteData) setExpediente(expedienteData); }, [expedienteData]);
+
+  const mutExpediente = useMutation({
+    mutationFn: () => salvarExpediente({ dias: expediente }),
+    onSuccess: () => toast.success("Expediente salvo!"),
+    onError: () => toast.error("Erro ao salvar expediente."),
+  });
 
   const mut = useMutation({
     mutationFn: () => salvarParametros(form),
@@ -155,37 +175,66 @@ export default function ConfiguracoesPage() {
           </div>
         </div>
 
-        {/* Horários de visita */}
+        {/* Expediente semanal */}
         <div className="card">
-          <div className="card-header">
-            <span className="text-sm font-semibold text-slate-900">Horários e Duração</span>
+          <div className="card-header flex items-center justify-between">
+            <span className="text-sm font-semibold text-slate-900">Expediente Semanal</span>
+            <button onClick={() => mutExpediente.mutate()}
+              disabled={mutExpediente.isPending}
+              className="btn-secondary btn-sm text-xs">
+              {mutExpediente.isPending ? "Salvando..." : "Salvar expediente"}
+            </button>
           </div>
           <div className="card-body">
             <p className="text-xs text-slate-400 mb-3">
-              Parâmetros usados para sugerir horários automaticamente ao publicar agendas.
+              Define os dias e horários de trabalho. Agendas não serão geradas fora do expediente.
             </p>
-            <div className="flex items-center justify-between py-3 border-b border-slate-50 gap-4">
-              <div className="flex-1">
-                <p className="text-sm font-medium text-slate-800">Horário de início</p>
-                <p className="text-xs text-slate-400 mt-0.5">Primeira visita do dia</p>
-              </div>
-              <input type="time" value={form.horario_inicio}
-                onChange={e => setForm(f => ({ ...f, horario_inicio: e.target.value }))}
-                className="w-32 text-right text-sm font-semibold text-slate-800 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-indigo-400" />
+            <div className="space-y-2">
+              {expediente.map((dia, idx) => (
+                <div key={idx} className={`rounded-xl border p-3 ${dia.ativo ? "border-slate-200 bg-white" : "border-slate-100 bg-slate-50 opacity-60"}`}>
+                  <div className="flex items-center gap-3 mb-2">
+                    <button onClick={() => setExpediente(prev => prev.map((d, i) => i === idx ? { ...d, ativo: !d.ativo } : d))}
+                      className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${dia.ativo ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-300"}`}>
+                      {dia.ativo && <span className="text-xs font-bold">✓</span>}
+                    </button>
+                    <span className="text-sm font-semibold text-slate-800 w-20">{DIAS[dia.dia_semana]}</span>
+                    {!dia.ativo && <span className="text-xs text-slate-400">Folga</span>}
+                  </div>
+                  {dia.ativo && (
+                    <div className="flex items-center gap-2 ml-8 flex-wrap">
+                      <input type="time" value={dia.manha_inicio}
+                        onChange={e => setExpediente(prev => prev.map((d, i) => i === idx ? { ...d, manha_inicio: e.target.value } : d))}
+                        className="text-xs border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:border-indigo-400 w-24" />
+                      <span className="text-xs text-slate-400">–</span>
+                      <input type="time" value={dia.manha_fim}
+                        onChange={e => setExpediente(prev => prev.map((d, i) => i === idx ? { ...d, manha_fim: e.target.value } : d))}
+                        className="text-xs border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:border-indigo-400 w-24" />
+                      <span className="text-xs text-slate-300 mx-1">|</span>
+                      <input type="time" value={dia.tarde_inicio}
+                        onChange={e => setExpediente(prev => prev.map((d, i) => i === idx ? { ...d, tarde_inicio: e.target.value } : d))}
+                        className="text-xs border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:border-indigo-400 w-24" />
+                      <span className="text-xs text-slate-400">–</span>
+                      <input type="time" value={dia.tarde_fim}
+                        onChange={e => setExpediente(prev => prev.map((d, i) => i === idx ? { ...d, tarde_fim: e.target.value } : d))}
+                        className="text-xs border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:border-indigo-400 w-24" />
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
-            <div className="flex items-center justify-between py-3 border-b border-slate-50 gap-4">
-              <div className="flex-1">
-                <p className="text-sm font-medium text-slate-800">Horário de término</p>
-                <p className="text-xs text-slate-400 mt-0.5">Última visita do dia</p>
-              </div>
-              <input type="time" value={form.horario_fim}
-                onChange={e => setForm(f => ({ ...f, horario_fim: e.target.value }))}
-                className="w-32 text-right text-sm font-semibold text-slate-800 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-indigo-400" />
-            </div>
+          </div>
+        </div>
+
+        {/* Duração e intervalo */}
+        <div className="card">
+          <div className="card-header">
+            <span className="text-sm font-semibold text-slate-900">Duração das Visitas</span>
+          </div>
+          <div className="card-body">
             <Campo label="Duração média da visita" desc="Tempo estimado por visita"
-              suffix="min" value={form.duracao_padrao_min} onChange={v => setForm(f => ({ ...f, duracao_padrao_min: v }))} />
+              suffix="min" value={form.duracao_padrao_min} onChange={set("duracao_padrao_min")} />
             <Campo label="Intervalo entre visitas" desc="Tempo de deslocamento entre clientes"
-              suffix="min" value={form.intervalo_min} onChange={v => setForm(f => ({ ...f, intervalo_min: v }))} />
+              suffix="min" value={form.intervalo_min} onChange={set("intervalo_min")} />
           </div>
         </div>
 
