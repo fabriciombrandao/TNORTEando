@@ -5,7 +5,7 @@ import { useAuthStore } from "../store/auth";
 import toast from "react-hot-toast";
 import {
   CalendarDays, ChevronLeft, ChevronRight, Zap, Eye,
-  CheckCircle, Circle, Clock, MapPin, Users, Send, Trash2, X
+  CheckCircle, Circle, Clock, MapPin, Users, Send, Trash2, X, RefreshCw
 } from "lucide-react";
 import { format, addMonths, subMonths, startOfMonth } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -176,6 +176,26 @@ export default function AgendaPage() {
     }).then(r => r.data),
   });
 
+  async function excluirPreAgenda() {
+    if (!esnSelecionado && isCS) { toast.error("Selecione um ESN."); return; }
+    const esn = esnSelecionado || (isESN ? usuario?.id : "");
+    if (!confirm("Excluir todas as pré-agendas deste mês para este executivo?")) return;
+    try {
+      await api.delete("/api/v1/agenda/pre-agenda", {
+        params: { esn_id: esn, mes, ano }
+      });
+      toast.success("Pré-agendas excluídas!");
+      qc.invalidateQueries({ queryKey: ["agendas"], exact: false });
+    } catch (e: any) {
+      toast.error(e.response?.data?.detail || "Erro ao excluir.");
+    }
+  }
+
+  async function regenerarAgenda() {
+    await excluirPreAgenda();
+    await gerarAgenda();
+  }
+
   async function gerarAgenda() {
     setGerando(true);
     try {
@@ -214,11 +234,21 @@ export default function AgendaPage() {
             {isCS ? "Gerencie e publique agendas dos executivos" : "Suas visitas agendadas"}
           </p>
         </div>
-        <button onClick={gerarAgenda} disabled={gerando}
-          className="btn-primary btn-sm">
-          <Zap className="w-3.5 h-3.5" />
-          {gerando ? "Gerando..." : "Gerar agenda"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={excluirPreAgenda}
+            className="btn-secondary btn-sm">
+            <Trash2 className="w-3.5 h-3.5" /> Excluir pré-agenda
+          </button>
+          <button onClick={regenerarAgenda} disabled={gerando}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-amber-200 text-amber-700 text-xs font-semibold hover:bg-amber-50 disabled:opacity-50">
+            <RefreshCw className={`w-3.5 h-3.5 ${gerando ? "animate-spin" : ""}`} /> Regenerar
+          </button>
+          <button onClick={gerarAgenda} disabled={gerando}
+            className="btn-primary btn-sm">
+            <Zap className="w-3.5 h-3.5" />
+            {gerando ? "Gerando..." : "Gerar agenda"}
+          </button>
+        </div>
       </div>
 
       {/* Navegação de mês + filtro ESN */}
@@ -284,7 +314,7 @@ export default function AgendaPage() {
                             {format(new Date(ag.data + "T12:00:00"), "EEEE, d 'de' MMMM", { locale: ptBR })}
                           </p>
                           <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${STATUS_BADGE[ag.status] || STATUS_BADGE.RASCUNHO}`}>
-                            {ag.status || "RASCUNHO"}
+                            {ag.status || "PRÉ-AGENDA"}
                           </span>
                         </div>
                         <p className="text-xs text-slate-400 mt-0.5">{ag.total_itens} visitas · {ag.concluidos} concluídas</p>
@@ -314,7 +344,7 @@ export default function AgendaPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${STATUS_BADGE[ag.status] || STATUS_BADGE.RASCUNHO}`}>
-                    {ag.status || "RASCUNHO"}
+                    {ag.status || "PRÉ-AGENDA"}
                   </span>
                   <button onClick={() => setAgendaAberta(ag)}
                     className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:bg-indigo-50 hover:text-indigo-600">

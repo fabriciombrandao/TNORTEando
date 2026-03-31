@@ -1408,6 +1408,50 @@ async def listar_feriados(
 # Gestão de Agendas (CS/GSN)
 # ─────────────────────────────────────────────
 
+@router.delete("/agenda/pre-agenda", tags=["agenda"])
+async def excluir_pre_agenda(
+    esn_id: str,
+    mes: int,
+    ano: int,
+    request: Request = None,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Exclui todas as pré-agendas (rascunhos) de um ESN em um mês/ano."""
+    from sqlalchemy import text as sqlt
+    papel = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+    if papel not in ("ADMIN", "GESTOR_EMPRESA", "CS", "GSN"):
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+
+    # Buscar agendas rascunho do ESN no período
+    res = await db.execute(sqlt("""
+        SELECT id FROM agendas
+        WHERE vendedor_id = :esn_id
+          AND EXTRACT(MONTH FROM data) = :mes
+          AND EXTRACT(YEAR FROM data) = :ano
+          AND (publicada = false OR publicada IS NULL)
+          AND (status = 'RASCUNHO' OR status IS NULL)
+    """), {"esn_id": esn_id, "mes": mes, "ano": ano})
+    ids = [str(r[0]) for r in res.fetchall()]
+
+    if not ids:
+        return {"ok": True, "deletados": 0, "mensagem": "Nenhuma pré-agenda encontrada."}
+
+    # Deletar itens e agendas
+    placeholders = ",".join([f"'{i}'" for i in ids])
+    await db.execute(sqlt(f"DELETE FROM agenda_itens WHERE agenda_id IN ({placeholders})"))
+    await db.execute(sqlt(f"DELETE FROM agendas WHERE id IN ({placeholders})"))
+    await db.commit()
+
+    await registrar_audit(db, "DELETE",
+        usuario_id=str(current_user.id), usuario_nome=current_user.nome, usuario_email=current_user.email,
+        entidade="agendas", entidade_id=esn_id,
+        descricao=f"Pré-agendas excluídas: {len(ids)} dias em {mes}/{ano} do ESN {esn_id}",
+        ip=request.client.host if request else None,
+    )
+    return {"ok": True, "deletados": len(ids)}
+
+
 @router.get("/agenda/lista", tags=["agenda"])
 async def listar_agendas(
     esn_id: Optional[str] = None,
