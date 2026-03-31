@@ -1546,6 +1546,125 @@ async def listar_itens_agenda(
     ]
 
 
+@router.post("/agenda/publicar-tudo", tags=["agenda"])
+async def publicar_todas_agendas(
+    body: dict,
+    request: Request = None,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Publica todas as pré-agendas de um ESN em um mês/ano, sugerindo horários automaticamente."""
+    from sqlalchemy import text as sqlt
+    from datetime import datetime, time, timedelta as tdelta
+    papel = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+    if papel not in ("ADMIN", "GESTOR_EMPRESA", "CS", "GSN"):
+        raise HTTPException(status_code=403, detail="Sem permissão para publicar.")
+
+    esn_id = body.get("esn_id")
+    mes = body.get("mes")
+    ano = body.get("ano")
+    if not esn_id or not mes or not ano:
+        raise HTTPException(status_code=400, detail="esn_id, mes e ano são obrigatórios.")
+
+    # Buscar parâmetros da organização
+    res_org = await db.execute(sqlt("""
+        SELECT u.organizacao_id FROM usuarios u WHERE u.id = :id
+    """), {"id": esn_id})
+    org_row = res_org.fetchone()
+    org_id = str(org_row[0]) if org_row else None
+
+    horario_inicio = "08:00"
+    duracao_min = 45
+    intervalo_min = 15
+    if org_id:
+        res_p = await db.execute(sqlt("""
+            SELECT horario_inicio::text, duracao_padrao_min, intervalo_entre_visitas_min
+            FROM parametros_organizacao WHERE organizacao_id = :org LIMIT 1
+        """), {"org": org_id})
+        p_row = res_p.fetchone()
+        if p_row:
+            horario_inicio = str(p_row[0])[:5] if p_row[0] else "08:00"
+            duracao_min = int(p_row[1]) if p_row[1] else 45
+            intervalo_min = int(p_row[2]) if p_row[2] else 15
+
+    # Buscar pré-agendas do ESN no mês
+    res = await db.execute(sqlt("""
+        SELECT id FROM agendas
+        WHERE vendedor_id = :esn_id
+          AND EXTRACT(MONTH FROM data) = :mes
+          AND EXTRACT(YEAR FROM data) = :ano
+          AND (publicada = false OR publicada IS NULL)
+          AND (status IN ('PRE_AGENDA', 'RASCUNHO') OR status IS NULL)
+        ORDER BY data
+    """), {"esn_id": esn_id, "mes": mes, "ano": ano})
+    agenda_ids = [str(r[0]) for r in res.fetchall()]
+
+    if not agenda_ids:
+        return {"ok": True, "publicadas": 0, "mensagem": "Nenhuma pré-agenda encontrada."}
+
+    hora_inicio_h, hora_inicio_m = map(int, horario_inicio.split(":"))
+    slot_min = duracao_min + intervalo_min
+
+    for ag_id in agenda_ids:
+        # Calcular horários para os itens deste dia
+        res_itens = await db.execute(sqlt("""
+            SELECT id, ordem FROM agenda_itens
+            WHERE agenda_id = :ag_id AND status != 'CANCELADO'
+            ORDER BY ordem
+        """), {"ag_id": ag_id})
+        itens = res_itens.fetchall()
+
+        for i, item in enumerate(itens):
+            total_min = hora_inicio_h * 60 + hora_inicio_m + i * slot_min
+            h = total_min // 60
+            m = total_min % 60
+            horario = f"{h:02d}:{m:02d}"
+            await db.execute(sqlt("""
+                UPDATE agenda_itens SET horario_previsto = :h
+                WHERE id = :id AND (horario_previsto IS NULL OR horario_previsto = '')
+            """), {"h": horario, "id": str(item[0])})
+
+        # Publicar a agenda
+        await db.execute(sqlt("""
+            UPDATE agendas SET
+                publicada = true,
+                status = 'PUBLICADA',
+                publicada_em = NOW(),
+                publicada_por = :pub_por
+            WHERE id = :id
+        """), {"id": ag_id, "pub_por": str(current_user.id)})
+
+    await db.commit()
+    await registrar_audit(db, "UPDATE",
+        usuario_id=str(current_user.id), usuario_nome=current_user.nome, usuario_email=current_user.email,
+        entidade="agendas", entidade_id=esn_id,
+        descricao=f"Todas pré-agendas publicadas: {len(agenda_ids)} dias em {mes}/{ano}",
+        ip=request.client.host if request else None,
+    )
+    return {"ok": True, "publicadas": len(agenda_ids)}
+
+
+# 2. Endpoint para atualizar horário de um item
+@router.put("/agenda/{agenda_id}/itens/{item_id}/horario", tags=["agenda"])
+async def atualizar_horario_item(
+    agenda_id: UUID,
+    item_id: UUID,
+    body: dict,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import text as sqlt
+    papel = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+    if papel not in ("ADMIN", "GESTOR_EMPRESA", "CS", "GSN"):
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+    await db.execute(sqlt("""
+        UPDATE agenda_itens SET horario_previsto = :h
+        WHERE id = :id AND agenda_id = :ag_id
+    """), {"h": body.get("horario"), "id": str(item_id), "ag_id": str(agenda_id)})
+    await db.commit()
+    return {"ok": True}
+
+
 @router.post("/agenda/{agenda_id}/publicar", tags=["agenda"])
 async def publicar_agenda(
     agenda_id: UUID,

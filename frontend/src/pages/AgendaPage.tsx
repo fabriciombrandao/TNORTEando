@@ -5,7 +5,7 @@ import { useAuthStore } from "../store/auth";
 import toast from "react-hot-toast";
 import {
   CalendarDays, ChevronLeft, ChevronRight, ChevronDown, Zap, Eye,
-  CheckCircle, Circle, Clock, MapPin, Send, Trash2, X
+  CheckCircle, Circle, Clock, MapPin, Send, Trash2, X, Pencil
 } from "lucide-react";
 import { format, addMonths, subMonths, startOfMonth } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -71,6 +71,18 @@ function ModalItens({ agenda, onClose }: { agenda: any; onClose: () => void }) {
     onError: (e: any) => toast.error(e.response?.data?.detail || "Erro."),
   });
 
+  const [editHorario, setEditHorario] = useState<{id: string; h: string} | null>(null);
+
+  const mutHorario = useMutation({
+    mutationFn: ({ itemId, h }: any) =>
+      api.put(`/api/v1/agenda/${agenda.id}/itens/${itemId}/horario`, { horario: h }).then(r => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["agenda-itens", agenda.id] });
+      setEditHorario(null);
+    },
+    onError: (e: any) => toast.error(e.response?.data?.detail || "Erro."),
+  });
+
   const podeEditar = ["ADMIN","GESTOR_EMPRESA","CS","GSN"].includes(papel) && !agenda.publicada;
 
   // Agrupar por dia
@@ -121,16 +133,38 @@ function ModalItens({ agenda, onClose }: { agenda: any; onClose: () => void }) {
                   </div>
                 </div>
                 {podeEditar && item.status !== "CANCELADO" && (
-                  <button onClick={() => setJustModal(item)}
-                    className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-300 hover:bg-red-50 hover:text-red-500">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  <div className="flex gap-1">
+                    <button onClick={() => setEditHorario({ id: item.id, h: item.horario_previsto || "" })}
+                      className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-300 hover:bg-indigo-50 hover:text-indigo-500">
+                      <Clock className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => setJustModal(item)}
+                      className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-300 hover:bg-red-50 hover:text-red-500">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 )}
               </div>
             ))
           )}
         </div>
       </div>
+
+      {/* Modal horário */}
+      {editHorario && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/50 px-4" onClick={() => setEditHorario(null)}>
+          <div className="w-full max-w-xs bg-white rounded-2xl p-5 shadow-xl" onClick={e => e.stopPropagation()}>
+            <p className="font-bold text-slate-900 mb-3">Definir horário</p>
+            <input type="time" value={editHorario.h} onChange={e => setEditHorario({ ...editHorario, h: e.target.value })}
+              className="input mb-4 text-center text-xl font-bold" />
+            <div className="flex gap-3">
+              <button onClick={() => setEditHorario(null)} className="btn-secondary btn-md flex-1">Cancelar</button>
+              <button onClick={() => mutHorario.mutate({ itemId: editHorario.id, h: editHorario.h })}
+                className="btn-primary btn-md flex-1">Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal justificativa */}
       {justModal && (
@@ -184,6 +218,19 @@ export default function AgendaPage() {
       params: { mes, ano, esn_id: esnSelecionado || undefined }
     }).then(r => r.data),
   });
+
+  async function publicarTudo(esnId: string) {
+    if (!confirm("Publicar todas as pré-agendas deste mês para este executivo?")) return;
+    try {
+      const res = await api.post("/api/v1/agenda/publicar-tudo", {
+        esn_id: esnId, mes, ano
+      });
+      toast.success(`${res.data.publicadas} agenda${res.data.publicadas !== 1 ? "s" : ""} publicada${res.data.publicadas !== 1 ? "s" : ""}!`);
+      qc.invalidateQueries({ queryKey: ["agendas"], exact: false });
+    } catch (e: any) {
+      toast.error(e.response?.data?.detail || "Erro ao publicar.");
+    }
+  }
 
   async function excluirPreAgenda() {
     if (!esnSelecionado && isCS) { toast.error("Selecione um ESN."); return; }
@@ -298,24 +345,25 @@ export default function AgendaPage() {
             const expandido = esnExpandido === key;
             return (
               <div key={key} className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-                <button onClick={() => setEsnExpandido(expandido ? null : key)}
-                  className="w-full flex items-center gap-3 px-5 py-4 hover:bg-slate-50 transition-colors text-left">
-                  <div className="w-9 h-9 rounded-xl bg-indigo-100 flex items-center justify-center text-sm font-bold text-indigo-600 flex-shrink-0">
-                    {nome.split(" ").slice(0,2).map((n:string) => n[0]).join("")}
-                  </div>
-                  <div className="flex-1">
-                    <p className="font-semibold text-slate-900 text-sm">{nome}</p>
-                    <p className="text-xs text-slate-400 mt-0.5">{cod} · {totalVisitas} visitas · {ags.length} dias · {publicadas} publicados · {totalConcluidas} concluídas</p>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {publicadas > 0 && (
-                      <span className="text-xs bg-emerald-50 text-emerald-700 font-semibold px-2 py-0.5 rounded-full">
-                        {publicadas} publicado{publicadas !== 1 ? "s" : ""}
-                      </span>
-                    )}
-                    <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${expandido ? "rotate-180" : ""}`} />
-                  </div>
-                </button>
+                <div className="flex items-center gap-2 px-5 py-4 hover:bg-slate-50 transition-colors">
+                  <button onClick={() => setEsnExpandido(expandido ? null : key)}
+                    className="flex items-center gap-3 flex-1 text-left">
+                    <div className="w-9 h-9 rounded-xl bg-indigo-100 flex items-center justify-center text-sm font-bold text-indigo-600 flex-shrink-0">
+                      {nome.split(" ").slice(0,2).map((n:string) => n[0]).join("")}
+                    </div>
+                    <div className="flex-1">
+                      <p className="font-semibold text-slate-900 text-sm">{nome}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">{cod} · {totalVisitas} visitas · {ags.length} dias · {publicadas} publicados · {totalConcluidas} concluídas</p>
+                    </div>
+                    <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform flex-shrink-0 ${expandido ? "rotate-180" : ""}`} />
+                  </button>
+                  {ags.some(a => !a.publicada) && (
+                    <button onClick={() => publicarTudo(key.split("|")[0])}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-semibold hover:bg-emerald-100 flex-shrink-0">
+                      <Send className="w-3 h-3" /> Publicar tudo
+                    </button>
+                  )}
+                </div>
                 {expandido && (
                   <div className="border-t border-slate-100 divide-y divide-slate-50">
                     {ags.map((ag: any) => (
