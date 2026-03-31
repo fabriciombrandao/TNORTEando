@@ -5,7 +5,7 @@ import { useAuthStore } from "../store/auth";
 import toast from "react-hot-toast";
 import {
   CalendarDays, ChevronLeft, ChevronRight, Zap, Eye,
-  CheckCircle, Circle, Clock, MapPin, Users, Send, Trash2, X, RefreshCw
+  CheckCircle, Circle, Clock, MapPin, Users, Send, Trash2, X
 } from "lucide-react";
 import { format, addMonths, subMonths, startOfMonth } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -13,6 +13,7 @@ import { ptBR } from "date-fns/locale";
 const MESES = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
 
 const STATUS_BADGE: Record<string, string> = {
+  "PRÉ-AGENDA": "bg-amber-50 text-amber-700",
   RASCUNHO:  "bg-amber-50 text-amber-700",
   PUBLICADA: "bg-emerald-50 text-emerald-700",
   ENCERRADA: "bg-slate-100 text-slate-500",
@@ -191,11 +192,6 @@ export default function AgendaPage() {
     }
   }
 
-  async function regenerarAgenda() {
-    await excluirPreAgenda();
-    await gerarAgenda();
-  }
-
   async function gerarAgenda() {
     setGerando(true);
     try {
@@ -238,10 +234,6 @@ export default function AgendaPage() {
           <button onClick={excluirPreAgenda}
             className="btn-secondary btn-sm">
             <Trash2 className="w-3.5 h-3.5" /> Excluir pré-agenda
-          </button>
-          <button onClick={regenerarAgenda} disabled={gerando}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-amber-200 text-amber-700 text-xs font-semibold hover:bg-amber-50 disabled:opacity-50">
-            <RefreshCw className={`w-3.5 h-3.5 ${gerando ? "animate-spin" : ""}`} /> Regenerar
           </button>
           <button onClick={gerarAgenda} disabled={gerando}
             className="btn-primary btn-sm">
@@ -313,7 +305,7 @@ export default function AgendaPage() {
                           <p className="text-sm font-medium text-slate-800">
                             {format(new Date(ag.data + "T12:00:00"), "EEEE, d 'de' MMMM", { locale: ptBR })}
                           </p>
-                          <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${STATUS_BADGE[ag.status] || STATUS_BADGE.RASCUNHO}`}>
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${STATUS_BADGE[ag.status] || STATUS_BADGE["PRÉ-AGENDA"]}`}>
                             {ag.status || "PRÉ-AGENDA"}
                           </span>
                         </div>
@@ -343,7 +335,7 @@ export default function AgendaPage() {
                   <p className="text-xs text-slate-400">{ag.total_itens} visitas · {ag.concluidos} concluídas</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${STATUS_BADGE[ag.status] || STATUS_BADGE.RASCUNHO}`}>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${STATUS_BADGE[ag.status] || STATUS_BADGE["PRÉ-AGENDA"]}`}>
                     {ag.status || "PRÉ-AGENDA"}
                   </span>
                   <button onClick={() => setAgendaAberta(ag)}

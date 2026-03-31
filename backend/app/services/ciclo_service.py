@@ -2,6 +2,7 @@
 ciclo_service.py
 Geração automática de agenda baseada no ciclo ABC de visitas.
 """
+import random
 from datetime import date, timedelta
 from typing import List, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -201,8 +202,18 @@ async def gerar_agenda_ciclo(
                 "razao_social": c["razao_social"],
             })
 
-    # Ordenar por urgência (mais atrasados/próximos primeiro)
+    # Ordenar por urgência (mais atrasados primeiro)
+    # Dentro do mesmo dia de urgência, embaralhar para variar a sequência mês a mês
     visitas_necessarias.sort(key=lambda x: x["proxima"])
+    
+    # Embaralhar clientes com mesma data de próxima visita para variar sequência
+    from itertools import groupby
+    grupos = []
+    for data_prox, grupo in groupby(visitas_necessarias, key=lambda x: x["proxima"]):
+        g = list(grupo)
+        random.shuffle(g)
+        grupos.extend(g)
+    visitas_necessarias = grupos
 
     # Distribuir nos dias úteis
     # Mapa: data -> lista de visitas agendadas
