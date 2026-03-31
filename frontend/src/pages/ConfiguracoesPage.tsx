@@ -52,6 +52,10 @@ export default function ConfiguracoesPage() {
     freq_c_dias: 45,
     ciclo_dias: 45,
     horizonte_dias: 30,
+    horario_inicio: "08:00",
+    horario_fim: "18:00",
+    duracao_padrao_min: 45,
+    intervalo_min: 15,
   });
 
   useEffect(() => {
@@ -148,6 +152,40 @@ export default function ConfiguracoesPage() {
               suffix="dias" value={form.freq_b_dias} onChange={set("freq_b_dias")} />
             <Campo label="Classe C" desc="Visitar a cada X dias"
               suffix="dias" value={form.freq_c_dias} onChange={set("freq_c_dias")} />
+          </div>
+        </div>
+
+        {/* Horários de visita */}
+        <div className="card">
+          <div className="card-header">
+            <span className="text-sm font-semibold text-slate-900">Horários e Duração</span>
+          </div>
+          <div className="card-body">
+            <p className="text-xs text-slate-400 mb-3">
+              Parâmetros usados para sugerir horários automaticamente ao publicar agendas.
+            </p>
+            <div className="flex items-center justify-between py-3 border-b border-slate-50 gap-4">
+              <div className="flex-1">
+                <p className="text-sm font-medium text-slate-800">Horário de início</p>
+                <p className="text-xs text-slate-400 mt-0.5">Primeira visita do dia</p>
+              </div>
+              <input type="time" value={form.horario_inicio}
+                onChange={e => setForm(f => ({ ...f, horario_inicio: e.target.value }))}
+                className="w-32 text-right text-sm font-semibold text-slate-800 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-indigo-400" />
+            </div>
+            <div className="flex items-center justify-between py-3 border-b border-slate-50 gap-4">
+              <div className="flex-1">
+                <p className="text-sm font-medium text-slate-800">Horário de término</p>
+                <p className="text-xs text-slate-400 mt-0.5">Última visita do dia</p>
+              </div>
+              <input type="time" value={form.horario_fim}
+                onChange={e => setForm(f => ({ ...f, horario_fim: e.target.value }))}
+                className="w-32 text-right text-sm font-semibold text-slate-800 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-indigo-400" />
+            </div>
+            <Campo label="Duração média da visita" desc="Tempo estimado por visita"
+              suffix="min" value={form.duracao_padrao_min} onChange={v => setForm(f => ({ ...f, duracao_padrao_min: v }))} />
+            <Campo label="Intervalo entre visitas" desc="Tempo de deslocamento entre clientes"
+              suffix="min" value={form.intervalo_min} onChange={v => setForm(f => ({ ...f, intervalo_min: v }))} />
           </div>
         </div>
 

@@ -2931,6 +2931,8 @@ async def get_parametros(
             "frequencia_padrao_dias": 30,
             "freq_a_dias": 15, "freq_b_dias": 30, "freq_c_dias": 45,
             "ciclo_dias": 45, "horizonte_dias": 30,
+            "horario_inicio": "08:00", "horario_fim": "18:00",
+            "duracao_padrao_min": 45, "intervalo_min": 15,
         }
 
     res = await db.execute(sqlt("""
@@ -2947,6 +2949,10 @@ async def get_parametros(
             COALESCE(freq_c_dias, 45)            as freq_c_dias,
             COALESCE(ciclo_dias, 45)             as ciclo_dias,
             COALESCE(horizonte_dias, 30)         as horizonte_dias,
+            COALESCE(horario_inicio::text, '08:00') as horario_inicio,
+            COALESCE(horario_fim::text, '18:00')    as horario_fim,
+            COALESCE(duracao_padrao_min, 45)     as duracao_padrao_min,
+            COALESCE(intervalo_entre_visitas_min, 15) as intervalo_min,
             organizacao_id
         FROM parametros_organizacao
         WHERE organizacao_id = :org_id
@@ -2961,6 +2967,8 @@ async def get_parametros(
             "frequencia_padrao_dias": 30,
             "freq_a_dias": 15, "freq_b_dias": 30, "freq_c_dias": 45,
             "ciclo_dias": 45, "horizonte_dias": 30,
+            "horario_inicio": "08:00", "horario_fim": "18:00",
+            "duracao_padrao_min": 45, "intervalo_min": 15,
         }
     return {
         "mrr_cliente_a": float(row[0]),
@@ -2975,7 +2983,11 @@ async def get_parametros(
         "freq_c_dias": int(row[9]),
         "ciclo_dias": int(row[10]),
         "horizonte_dias": int(row[11]),
-        "organizacao_id": str(row[12]) if row[12] else None,
+        "horario_inicio": str(row[12])[:5] if row[12] else "08:00",
+        "horario_fim": str(row[13])[:5] if row[13] else "18:00",
+        "duracao_padrao_min": int(row[14]) if row[14] else 45,
+        "intervalo_min": int(row[15]) if row[15] else 15,
+        "organizacao_id": str(row[16]) if row[16] else None,
     }
 
 @router.put("/parametros", tags=["parametros"])
@@ -3000,6 +3012,10 @@ async def salvar_parametros(
             visitas_por_dia_max = :vd,
             raio_checkin_metros = :rc,
             frequencia_padrao_dias = :fp,
+            horario_inicio       = :hi::time,
+            horario_fim          = :hf::time,
+            duracao_padrao_min   = :dp,
+            intervalo_entre_visitas_min = :iv,
             atualizado_em       = now()
         WHERE organizacao_id = :org_current
     """), {
@@ -3010,6 +3026,10 @@ async def salvar_parametros(
         "vd": body.get("visitas_por_dia_max", 8),
         "rc": body.get("raio_checkin_metros", 300),
         "fp": body.get("frequencia_padrao_dias", 30),
+        "hi": body.get("horario_inicio", "08:00"),
+        "hf": body.get("horario_fim", "18:00"),
+        "dp": body.get("duracao_padrao_min", 45),
+        "iv": body.get("intervalo_min", 15),
         "org_current": str(current_user.organizacao_id) if current_user.organizacao_id else None,
     })
 
