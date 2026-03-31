@@ -1271,7 +1271,7 @@ async def gerar_agenda_ciclo(
 
     # Buscar GSN e org do ESN
     res = await db.execute(sqlt("""
-        SELECT hv.superior_id, u.organizacao_id, u.uf_atuacao
+        SELECT hv.superior_id, u.organizacao_id
         FROM hierarquia_vendas hv
         JOIN usuarios u ON u.id = hv.subordinado_id
         WHERE hv.subordinado_id = :uid LIMIT 1
@@ -1279,11 +1279,10 @@ async def gerar_agenda_ciclo(
     row = res.fetchone()
     gsn_id = str(row[0]) if row else esn_id
     org_id = str(row[1]) if row else esn_id
-    uf_esn  = row[2] if row and row[2] else "TO"
 
     data_inicio = _date.fromisoformat(body["data_inicio"]) if body.get("data_inicio") else _date.today()
 
-    agenda_items = await _gerar(db, esn_id, gsn_id, org_id, uf_esn, data_inicio)
+    agenda_items = await _gerar(db, esn_id, gsn_id, org_id, "TO", data_inicio)
 
     if not agenda_items:
         return {"ok": True, "total": 0, "mensagem": "Nenhuma visita necessária no período."}
@@ -1293,8 +1292,10 @@ async def gerar_agenda_ciclo(
     from app.services.agenda_service import AgendaService
     from collections import defaultdict
 
+    # Converter datas para string nas keys
     por_dia = defaultdict(list)
     for item in agenda_items:
+        item["data"] = str(item["data"])
         por_dia[item["data"]].append(item)
 
     for dia, itens in por_dia.items():
@@ -1337,7 +1338,9 @@ async def gerar_agenda_ciclo(
 
 @router.get("/agenda/ciclo/preview", tags=["agenda"])
 async def preview_agenda_ciclo(
+    request: Request,
     esn_id: Optional[str] = None,
+    data_inicio: Optional[str] = None,
     current_user: Usuario = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1348,7 +1351,7 @@ async def preview_agenda_ciclo(
 
     uid = esn_id or str(current_user.id)
     res = await db.execute(sqlt("""
-        SELECT hv.superior_id, u.organizacao_id, u.uf_atuacao
+        SELECT hv.superior_id, u.organizacao_id
         FROM hierarquia_vendas hv
         JOIN usuarios u ON u.id = hv.subordinado_id
         WHERE hv.subordinado_id = :uid LIMIT 1
@@ -1356,10 +1359,16 @@ async def preview_agenda_ciclo(
     row = res.fetchone()
     gsn_id = str(row[0]) if row else uid
     org_id = str(row[1]) if row else uid
-    uf_esn  = row[2] if row and row[2] else "TO"
 
-    items = await _gerar(db, uid, gsn_id, org_id, uf_esn, _date.today())
-    return {"total": len(items), "items": items[:50]}
+    data_inicio = _date.fromisoformat(request.query_params.get("data_inicio", str(_date.today()))) if hasattr(request, "query_params") else _date.today()
+
+    items = await _gerar(db, uid, gsn_id, org_id, "TO", data_inicio)
+
+    # Converter datas para string
+    for item in items:
+        item["data"] = str(item["data"])
+
+    return {"total": len(items), "items": items}
 
 
 @router.get("/agenda/justificativas", tags=["agenda"])
@@ -1386,6 +1395,165 @@ async def listar_feriados(
         params["uf"] = uf.upper()
     res = await db.execute(sqlt(f"SELECT data, nome, uf FROM feriados {where} ORDER BY data"), params)
     return [{"data": str(r[0]), "nome": r[1], "uf": r[2]} for r in res.fetchall()]
+
+
+# ─────────────────────────────────────────────
+# Gestão de Agendas (CS/GSN)
+# ─────────────────────────────────────────────
+
+@router.get("/agenda/lista", tags=["agenda"])
+async def listar_agendas(
+    esn_id: Optional[str] = None,
+    mes: Optional[int] = None,
+    ano: Optional[int] = None,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Lista agendas por ESN com contagem de itens."""
+    from sqlalchemy import text as sqlt
+    from datetime import date as _date
+
+    papel = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+    hoje = _date.today()
+    mes_filtro = mes or hoje.month
+    ano_filtro = ano or hoje.year
+
+    where = ["EXTRACT(MONTH FROM a.data) = :mes", "EXTRACT(YEAR FROM a.data) = :ano"]
+    params = {"mes": mes_filtro, "ano": ano_filtro}
+
+    if esn_id:
+        where.append("a.vendedor_id = :esn_id")
+        params["esn_id"] = esn_id
+    elif papel == "ESN":
+        where.append("a.vendedor_id = :esn_id")
+        params["esn_id"] = str(current_user.id)
+    elif papel in ("CS", "GSN"):
+        # Ver agendas dos ESNs da hierarquia
+        where.append("""a.vendedor_id IN (
+            SELECT hv.subordinado_id FROM hierarquia_vendas hv
+            WHERE hv.superior_id = :sup_id
+        )""")
+        params["sup_id"] = str(current_user.id)
+
+    where_sql = "WHERE " + " AND ".join(where)
+
+    res = await db.execute(sqlt(f"""
+        SELECT a.id, a.vendedor_id, a.data, a.status, a.publicada,
+               a.gerada_por, a.publicada_em,
+               u.nome as vendedor_nome, u.codigo_externo,
+               COUNT(ai.id) as total_itens,
+               SUM(CASE WHEN ai.status = 'CONCLUIDO' THEN 1 ELSE 0 END) as concluidos
+        FROM agendas a
+        JOIN usuarios u ON u.id = a.vendedor_id
+        LEFT JOIN agenda_itens ai ON ai.agenda_id = a.id
+        {where_sql}
+        GROUP BY a.id, a.vendedor_id, a.data, a.status, a.publicada,
+                 a.gerada_por, a.publicada_em, u.nome, u.codigo_externo
+        ORDER BY a.data
+    """), params)
+
+    rows = res.fetchall()
+    return [
+        {
+            "id": str(r[0]), "vendedor_id": str(r[1]), "data": str(r[2]),
+            "status": r[3] or "RASCUNHO", "publicada": bool(r[4]),
+            "gerada_por": r[5], "publicada_em": str(r[6]) if r[6] else None,
+            "vendedor_nome": r[7], "codigo_externo": r[8],
+            "total_itens": int(r[9] or 0), "concluidos": int(r[10] or 0),
+        }
+        for r in rows
+    ]
+
+
+@router.get("/agenda/{agenda_id}/itens", tags=["agenda"])
+async def listar_itens_agenda(
+    agenda_id: UUID,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Lista itens de uma agenda específica com dados do cliente."""
+    from sqlalchemy import text as sqlt
+    res = await db.execute(sqlt("""
+        SELECT ai.id, ai.cliente_id, ai.ordem, ai.status,
+               ai.horario_previsto, ai.observacoes,
+               c.razao_social, c.municipio, c.uf,
+               c.classificacao_abc, c.lat, c.lng
+        FROM agenda_itens ai
+        JOIN clientes c ON c.id = ai.cliente_id
+        WHERE ai.agenda_id = :ag_id
+        ORDER BY ai.ordem
+    """), {"ag_id": str(agenda_id)})
+    rows = res.fetchall()
+    return [
+        {
+            "id": str(r[0]), "cliente_id": str(r[1]), "ordem": r[2],
+            "status": r[3], "horario_previsto": r[4], "observacoes": r[5],
+            "razao_social": r[6], "municipio": r[7], "uf": r[8],
+            "classificacao_abc": r[9], "lat": r[10], "lng": r[11],
+        }
+        for r in rows
+    ]
+
+
+@router.post("/agenda/{agenda_id}/publicar", tags=["agenda"])
+async def publicar_agenda(
+    agenda_id: UUID,
+    request: Request = None,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """CS/GSN publica uma agenda — ESN passa a visualizar."""
+    from sqlalchemy import text as sqlt
+    papel = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+    if papel not in ("ADMIN", "GESTOR_EMPRESA", "CS", "GSN"):
+        raise HTTPException(status_code=403, detail="Sem permissão para publicar.")
+
+    await db.execute(sqlt("""
+        UPDATE agendas SET
+            publicada = true,
+            status = 'PUBLICADA',
+            publicada_em = NOW(),
+            publicada_por = :pub_por
+        WHERE id = :id
+    """), {"id": str(agenda_id), "pub_por": str(current_user.id)})
+    await db.commit()
+
+    await registrar_audit(db, "UPDATE",
+        usuario_id=str(current_user.id), usuario_nome=current_user.nome, usuario_email=current_user.email,
+        entidade="agendas", entidade_id=str(agenda_id),
+        descricao=f"Agenda publicada pelo {papel}",
+        ip=request.client.host if request else None,
+    )
+    return {"ok": True, "mensagem": "Agenda publicada com sucesso."}
+
+
+@router.delete("/agenda/{agenda_id}/itens/{item_id}", tags=["agenda"])
+async def remover_item_agenda(
+    agenda_id: UUID,
+    item_id: UUID,
+    body: dict = {},
+    request: Request = None,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """CS/GSN remove um item da agenda (com justificativa)."""
+    from sqlalchemy import text as sqlt
+    papel = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+    if papel not in ("ADMIN", "GESTOR_EMPRESA", "CS", "GSN"):
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+
+    await db.execute(sqlt("""
+        UPDATE agenda_itens SET
+            status = 'CANCELADO',
+            justificativa_ajuste = :just,
+            ajustado_por = :por
+        WHERE id = :id AND agenda_id = :ag_id
+    """), {
+        "id": str(item_id), "ag_id": str(agenda_id),
+        "just": body.get("justificativa"), "por": str(current_user.id),
+    })
+    await db.commit()
+    return {"ok": True}
 
 
 # ─────────────────────────────────────────────
