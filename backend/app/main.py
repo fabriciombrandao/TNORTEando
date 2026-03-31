@@ -1315,8 +1315,8 @@ async def gerar_agenda_ciclo(
         if not ag_row:
             ag_id = str(uuid.uuid4())
             await db.execute(sqlt("""
-                INSERT INTO agendas (id, vendedor_id, data, gerada_por, publicada)
-                VALUES (:id, :v, :d, 'CICLO', false)
+                INSERT INTO agendas (id, vendedor_id, data, gerada_por, publicada, status)
+                VALUES (:id, :v, :d, 'CICLO', false, 'PRE_AGENDA')
                 ON CONFLICT (vendedor_id, data) DO NOTHING
             """), {"id": ag_id, "v": esn_id, "d": dia_obj})
             res_ag2 = await db.execute(sqlt(

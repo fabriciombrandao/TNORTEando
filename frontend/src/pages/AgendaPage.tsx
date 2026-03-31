@@ -13,11 +13,18 @@ import { ptBR } from "date-fns/locale";
 const MESES = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
 
 const STATUS_BADGE: Record<string, string> = {
-  "PRÉ-AGENDA": "bg-amber-50 text-amber-700",
-  RASCUNHO:  "bg-amber-50 text-amber-700",
-  PUBLICADA: "bg-emerald-50 text-emerald-700",
-  ENCERRADA: "bg-slate-100 text-slate-500",
+  PRE_AGENDA: "bg-amber-50 text-amber-700",
+  RASCUNHO:   "bg-amber-50 text-amber-700",
+  PUBLICADA:  "bg-emerald-50 text-emerald-700",
+  ENCERRADA:  "bg-slate-100 text-slate-500",
 };
+
+function statusLabel(status: string | null) {
+  if (!status || status === "RASCUNHO" || status === "PRE_AGENDA") return "Pré-Agenda";
+  if (status === "PUBLICADA") return "Publicada";
+  if (status === "ENCERRADA") return "Encerrada";
+  return status;
+}
 
 const STATUS_ITEM: Record<string, string> = {
   PENDENTE:   "text-slate-400",
@@ -305,7 +312,7 @@ export default function AgendaPage() {
                           <p className="text-sm font-medium text-slate-800">
                             {format(new Date(ag.data + "T12:00:00"), "EEEE, d 'de' MMMM", { locale: ptBR })}
                           </p>
-                          <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${STATUS_BADGE[ag.status] || STATUS_BADGE["PRÉ-AGENDA"]}`}>
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${STATUS_BADGE[ag.status] || STATUS_BADGE.RASCUNHO}`}>
                             {ag.status || "PRÉ-AGENDA"}
                           </span>
                         </div>
@@ -335,7 +342,7 @@ export default function AgendaPage() {
                   <p className="text-xs text-slate-400">{ag.total_itens} visitas · {ag.concluidos} concluídas</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${STATUS_BADGE[ag.status] || STATUS_BADGE["PRÉ-AGENDA"]}`}>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${STATUS_BADGE[ag.status] || STATUS_BADGE.RASCUNHO}`}>
                     {ag.status || "PRÉ-AGENDA"}
                   </span>
                   <button onClick={() => setAgendaAberta(ag)}
