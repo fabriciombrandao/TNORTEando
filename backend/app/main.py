@@ -1105,12 +1105,16 @@ async def listar_esns_do_cs(
     if papel not in ("CS", "GSN", "GESTOR_EMPRESA", "ADMIN"):
         raise HTTPException(status_code=403, detail="Sem permissão.")
 
-    # Buscar GSN do CS (superior imediato)
-    res_gsn = await db.execute(sqlt(
-        "SELECT superior_id FROM hierarquia_vendas WHERE subordinado_id = :id LIMIT 1"
-    ), {"id": str(current_user.id)})
-    gsn_row = res_gsn.fetchone()
-    gsn_id = str(gsn_row[0]) if gsn_row else str(current_user.id)
+    # Se GSN ou ADMIN/GESTOR — usa o próprio ID como GSN
+    # Se CS — busca o GSN superior
+    if papel == "CS":
+        res_gsn = await db.execute(sqlt(
+            "SELECT superior_id FROM hierarquia_vendas WHERE subordinado_id = :id LIMIT 1"
+        ), {"id": str(current_user.id)})
+        gsn_row = res_gsn.fetchone()
+        gsn_id = str(gsn_row[0]) if gsn_row else str(current_user.id)
+    else:
+        gsn_id = str(current_user.id)
 
     # Buscar ESNs sob o GSN
     res = await db.execute(sqlt("""
