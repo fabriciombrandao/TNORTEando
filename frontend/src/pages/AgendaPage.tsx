@@ -46,7 +46,7 @@ function ModalItens({ agenda, onClose }: { agenda: any; onClose: () => void }) {
     mutationFn: () => api.post(`/api/v1/agenda/${agenda.id}/publicar`).then(r => r.data),
     onSuccess: () => {
       toast.success("Agenda publicada!");
-      qc.invalidateQueries({ queryKey: ["agendas"] });
+      qc.invalidateQueries({ queryKey: ["agendas"], exact: false });
       onClose();
     },
     onError: (e: any) => toast.error(e.response?.data?.detail || "Erro ao publicar."),
@@ -189,8 +189,8 @@ export default function AgendaPage() {
         data_inicio: dataInicio,
       });
       toast.success(`${res.data.total} visitas geradas em ${res.data.dias} dias!`);
-      qc.invalidateQueries({ queryKey: ["agendas"] });
       setMesAtual(proxMes);
+      setTimeout(() => qc.invalidateQueries({ queryKey: ["agendas"], exact: false }), 100);
     } catch (e: any) {
       toast.error(e.response?.data?.detail || "Erro ao gerar agenda.");
     } finally {
