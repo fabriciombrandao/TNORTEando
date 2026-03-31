@@ -39,10 +39,19 @@ function ModalItens({ agenda, onClose }: { agenda: any; onClose: () => void }) {
   const papel = usuario?.papel || "";
   const [justModal, setJustModal] = useState<any>(null);
   const [justText, setJustText] = useState("");
+  const [editHorario, setEditHorario] = useState<{id: string; h: string} | null>(null);
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
+  const [horarios, setHorarios] = useState<Record<string, string>>({});
 
   const { data: itens = [], isLoading } = useQuery({
     queryKey: ["agenda-itens", agenda.id],
     queryFn: () => api.get(`/api/v1/agenda/${agenda.id}/itens`).then(r => r.data),
+  });
+
+  const { data: params } = useQuery({
+    queryKey: ["agenda-params-horario", agenda.id],
+    queryFn: () => api.get(`/api/v1/agenda/${agenda.id}/parametros-horario`).then(r => r.data),
+    enabled: !agenda.publicada,
   });
 
   const { data: justificativas = [] } = useQuery({
@@ -50,11 +59,43 @@ function ModalItens({ agenda, onClose }: { agenda: any; onClose: () => void }) {
     queryFn: () => api.get("/api/v1/cadastros/justificativas_agenda").then(r => r.data),
   });
 
-  const mutPublicar = useMutation({
-    mutationFn: () => api.post(`/api/v1/agenda/${agenda.id}/publicar`).then(r => r.data),
-    onSuccess: () => {
-      toast.success("Agenda publicada!");
+  // Calcular horários sugeridos quando itens e params estiverem disponíveis
+  const itensAtivos = (itens as any[]).filter(i => i.status !== "CANCELADO");
+
+  function calcularHorarios(itensLista: any[]) {
+    if (!params) return;
+    const [hh, mm] = (params.horario_inicio || "08:00").split(":").map(Number);
+    const slot = (params.duracao_min || 45) + (params.intervalo_min || 15);
+    const novosHorarios: Record<string, string> = {};
+    itensLista.forEach((item, i) => {
+      if (!item.horario_previsto) {
+        const total = hh * 60 + mm + i * slot;
+        novosHorarios[item.id] = `${String(Math.floor(total/60)).padStart(2,"0")}:${String(total%60).padStart(2,"0")}`;
+      } else {
+        novosHorarios[item.id] = item.horario_previsto;
+      }
+    });
+    setHorarios(novosHorarios);
+    // Selecionar todos por padrão
+    setSelecionados(new Set(itensLista.map(i => i.id)));
+  }
+
+  // Quando itens carregam, calcular horários e selecionar todos
+  const [inicializado, setInicializado] = useState(false);
+  if (!inicializado && itensAtivos.length > 0 && params) {
+    calcularHorarios(itensAtivos);
+    setInicializado(true);
+  }
+
+  const mutPublicarItens = useMutation({
+    mutationFn: () => api.post(`/api/v1/agenda/${agenda.id}/publicar-itens`, {
+      item_ids: Array.from(selecionados),
+      horarios,
+    }).then(r => r.data),
+    onSuccess: (res) => {
+      toast.success(`${res.publicados} visita${res.publicados !== 1 ? "s" : ""} publicada${res.publicados !== 1 ? "s" : ""}!`);
       qc.invalidateQueries({ queryKey: ["agendas"], exact: false });
+      qc.invalidateQueries({ queryKey: ["agenda-itens", agenda.id] });
       onClose();
     },
     onError: (e: any) => toast.error(e.response?.data?.detail || "Erro ao publicar."),
@@ -66,17 +107,17 @@ function ModalItens({ agenda, onClose }: { agenda: any; onClose: () => void }) {
     onSuccess: () => {
       toast.success("Visita removida.");
       qc.invalidateQueries({ queryKey: ["agenda-itens", agenda.id] });
+      setSelecionados(prev => { const s = new Set(prev); s.delete(justModal?.id); return s; });
       setJustModal(null);
     },
     onError: (e: any) => toast.error(e.response?.data?.detail || "Erro."),
   });
 
-  const [editHorario, setEditHorario] = useState<{id: string; h: string} | null>(null);
-
   const mutHorario = useMutation({
     mutationFn: ({ itemId, h }: any) =>
       api.put(`/api/v1/agenda/${agenda.id}/itens/${itemId}/horario`, { horario: h }).then(r => r.data),
-    onSuccess: () => {
+    onSuccess: (_, vars) => {
+      setHorarios(prev => ({ ...prev, [vars.itemId]: vars.h }));
       qc.invalidateQueries({ queryKey: ["agenda-itens", agenda.id] });
       setEditHorario(null);
     },
@@ -84,70 +125,101 @@ function ModalItens({ agenda, onClose }: { agenda: any; onClose: () => void }) {
   });
 
   const podeEditar = ["ADMIN","GESTOR_EMPRESA","CS","GSN"].includes(papel) && !agenda.publicada;
+  const totalSelecionados = selecionados.size;
 
-  // Agrupar por dia
-  const porDia: Record<string, any[]> = {};
-  (itens as any[]).forEach(item => {
-    if (!porDia[item.data || agenda.data]) porDia[item.data || agenda.data] = [];
-    porDia[item.data || agenda.data].push(item);
-  });
+  function toggleItem(id: string) {
+    setSelecionados(prev => {
+      const s = new Set(prev);
+      if (s.has(id)) s.delete(id); else s.add(id);
+      return s;
+    });
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40" onClick={onClose}>
       <div className="w-full md:max-w-2xl bg-white rounded-t-2xl md:rounded-2xl shadow-xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 sticky top-0 bg-white">
           <div>
             <p className="font-bold text-slate-900">{agenda.vendedor_nome} · {agenda.codigo_externo}</p>
-            <p className="text-xs text-slate-400">{agenda.total_itens} visitas · {format(new Date(agenda.data + "T12:00:00"), "MMMM yyyy", { locale: ptBR })}</p>
+            <p className="text-xs text-slate-400">
+              {format(new Date(agenda.data + "T12:00:00"), "EEEE, d 'de' MMMM", { locale: ptBR })} · {agenda.total_itens} visitas
+            </p>
           </div>
-          <div className="flex items-center gap-2">
-            {podeEditar && (
-              <button onClick={() => mutPublicar.mutate()}
-                className="btn-primary btn-sm">
-                <Send className="w-3.5 h-3.5" /> Publicar
-              </button>
-            )}
-            <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
-          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
         </div>
 
-        <div className="overflow-y-auto flex-1 p-4 space-y-4">
+        {/* Lista de itens */}
+        <div className="overflow-y-auto flex-1 divide-y divide-slate-50">
           {isLoading ? (
             <p className="text-center py-8 text-slate-400">Carregando...</p>
-          ) : (itens as any[]).length === 0 ? (
+          ) : itensAtivos.length === 0 ? (
             <p className="text-center py-8 text-slate-400">Nenhuma visita agendada.</p>
           ) : (
-            (itens as any[]).map((item: any) => (
-              <div key={item.id} className={`flex items-start gap-3 py-3 border-b border-slate-50 last:border-0 ${item.status === "CANCELADO" ? "opacity-40" : ""}`}>
-                <div className={`mt-0.5 flex-shrink-0 ${STATUS_ITEM[item.status] || "text-slate-400"}`}>
-                  {item.status === "CONCLUIDO" ? <CheckCircle className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-slate-800">{item.razao_social}</p>
-                  <div className="flex items-center gap-3 mt-0.5">
-                    {item.municipio && <span className="flex items-center gap-1 text-xs text-slate-400"><MapPin className="w-3 h-3" />{item.municipio}</span>}
-                    {item.classificacao_abc && <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${item.classificacao_abc === "A" ? "bg-emerald-50 text-emerald-700" : item.classificacao_abc === "B" ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-500"}`}>
-                      {item.classificacao_abc}
-                    </span>}
-                    {item.horario_previsto && <span className="flex items-center gap-1 text-xs text-slate-400"><Clock className="w-3 h-3" />{item.horario_previsto}</span>}
-                  </div>
-                </div>
-                {podeEditar && item.status !== "CANCELADO" && (
-                  <div className="flex gap-1">
-                    <button onClick={() => setEditHorario({ id: item.id, h: item.horario_previsto || "" })}
-                      className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-300 hover:bg-indigo-50 hover:text-indigo-500">
-                      <Clock className="w-3.5 h-3.5" />
+            itensAtivos.map((item: any) => {
+              const sel = selecionados.has(item.id);
+              const h = horarios[item.id] || item.horario_previsto || "";
+              return (
+                <div key={item.id} className={`flex items-center gap-3 px-4 py-3 ${!sel && podeEditar ? "opacity-50" : ""}`}>
+                  {/* Checkbox */}
+                  {podeEditar && (
+                    <button onClick={() => toggleItem(item.id)}
+                      className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${sel ? "bg-indigo-600 border-indigo-600" : "border-slate-300"}`}>
+                      {sel && <CheckCircle className="w-3 h-3 text-white" />}
                     </button>
+                  )}
+                  {/* Horário */}
+                  {podeEditar ? (
+                    <button onClick={() => setEditHorario({ id: item.id, h })}
+                      className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-lg w-14 text-center flex-shrink-0 hover:bg-indigo-100">
+                      {h || "--:--"}
+                    </button>
+                  ) : (
+                    h ? <span className="text-xs text-slate-400 w-14 text-center flex-shrink-0">{h}</span> : null
+                  )}
+                  {/* Dados do cliente */}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-slate-800">{item.razao_social}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      {item.municipio && <span className="flex items-center gap-1 text-xs text-slate-400"><MapPin className="w-3 h-3" />{item.municipio}</span>}
+                      {item.classificacao_abc && (
+                        <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${item.classificacao_abc === "A" ? "bg-emerald-50 text-emerald-700" : item.classificacao_abc === "B" ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-500"}`}>
+                          {item.classificacao_abc}
+                        </span>
+                      )}
+                      {item.publicado && <span className="text-xs bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded font-medium">Publicado</span>}
+                    </div>
+                  </div>
+                  {/* Remover */}
+                  {podeEditar && (
                     <button onClick={() => setJustModal(item)}
-                      className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-300 hover:bg-red-50 hover:text-red-500">
+                      className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-300 hover:bg-red-50 hover:text-red-500 flex-shrink-0">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
-                  </div>
-                )}
-              </div>
-            ))
+                  )}
+                </div>
+              );
+            })
           )}
         </div>
+
+        {/* Footer com botão publicar */}
+        {podeEditar && itensAtivos.length > 0 && (
+          <div className="px-5 py-4 border-t border-slate-100 sticky bottom-0 bg-white">
+            <div className="flex items-center justify-between mb-2">
+              <button onClick={() => setSelecionados(new Set(itensAtivos.map((i:any) => i.id)))}
+                className="text-xs text-indigo-600 hover:underline">Selecionar todos</button>
+              <button onClick={() => setSelecionados(new Set())}
+                className="text-xs text-slate-400 hover:underline">Limpar seleção</button>
+            </div>
+            <button onClick={() => mutPublicarItens.mutate()}
+              disabled={totalSelecionados === 0 || mutPublicarItens.isPending}
+              className="btn-primary btn-md w-full">
+              <Send className="w-4 h-4" />
+              {mutPublicarItens.isPending ? "Publicando..." : `Publicar selecionados (${totalSelecionados})`}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Modal horário */}
@@ -159,8 +231,10 @@ function ModalItens({ agenda, onClose }: { agenda: any; onClose: () => void }) {
               className="input mb-4 text-center text-xl font-bold" />
             <div className="flex gap-3">
               <button onClick={() => setEditHorario(null)} className="btn-secondary btn-md flex-1">Cancelar</button>
-              <button onClick={() => mutHorario.mutate({ itemId: editHorario.id, h: editHorario.h })}
-                className="btn-primary btn-md flex-1">Salvar</button>
+              <button onClick={() => {
+                setHorarios(prev => ({ ...prev, [editHorario.id]: editHorario.h }));
+                setEditHorario(null);
+              }} className="btn-primary btn-md flex-1">Confirmar</button>
             </div>
           </div>
         </div>

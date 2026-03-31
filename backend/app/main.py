@@ -1528,7 +1528,8 @@ async def listar_itens_agenda(
         SELECT ai.id, ai.cliente_id, ai.ordem, ai.status,
                ai.horario_previsto, ai.observacoes,
                c.razao_social, c.municipio, c.uf,
-               c.classificacao_abc, c.lat, c.lng
+               c.classificacao_abc, c.lat, c.lng,
+               COALESCE(ai.publicado, false) as publicado
         FROM agenda_itens ai
         JOIN clientes c ON c.id = ai.cliente_id
         WHERE ai.agenda_id = :ag_id
@@ -1541,6 +1542,7 @@ async def listar_itens_agenda(
             "status": r[3], "horario_previsto": r[4], "observacoes": r[5],
             "razao_social": r[6], "municipio": r[7], "uf": r[8],
             "classificacao_abc": r[9], "lat": r[10], "lng": r[11],
+            "publicado": bool(r[12]),
         }
         for r in rows
     ]
@@ -1663,6 +1665,97 @@ async def atualizar_horario_item(
     """), {"h": body.get("horario"), "id": str(item_id), "ag_id": str(agenda_id)})
     await db.commit()
     return {"ok": True}
+
+
+@router.post("/agenda/{agenda_id}/publicar-itens", tags=["agenda"])
+async def publicar_itens_seletivos(
+    agenda_id: UUID,
+    body: dict,
+    request: Request = None,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """CS/GSN publica itens específicos de uma agenda com horários definidos."""
+    from sqlalchemy import text as sqlt
+    papel = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+    if papel not in ("ADMIN", "GESTOR_EMPRESA", "CS", "GSN"):
+        raise HTTPException(status_code=403, detail="Sem permissão para publicar.")
+
+    item_ids = body.get("item_ids", [])
+    horarios = body.get("horarios", {})  # {item_id: "HH:MM"}
+
+    if not item_ids:
+        raise HTTPException(status_code=400, detail="Nenhum item selecionado.")
+
+    # Atualizar cada item selecionado
+    for item_id in item_ids:
+        params = {"id": item_id, "ag_id": str(agenda_id), "pub_por": str(current_user.id)}
+        h = horarios.get(item_id)
+        if h:
+            await db.execute(sqlt("""
+                UPDATE agenda_itens SET publicado = true, horario_previsto = :h
+                WHERE id = :id AND agenda_id = :ag_id
+            """), {**params, "h": h})
+        else:
+            await db.execute(sqlt("""
+                UPDATE agenda_itens SET publicado = true
+                WHERE id = :id AND agenda_id = :ag_id
+            """), params)
+
+    # Se todos os itens ativos estão publicados, publicar a agenda também
+    res = await db.execute(sqlt("""
+        SELECT COUNT(*) FILTER (WHERE status != 'CANCELADO' AND publicado = false) as pendentes
+        FROM agenda_itens WHERE agenda_id = :ag_id
+    """), {"ag_id": str(agenda_id)})
+    pendentes = res.fetchone()[0]
+
+    if pendentes == 0:
+        await db.execute(sqlt("""
+            UPDATE agendas SET publicada = true, status = 'PUBLICADA',
+                publicada_em = NOW(), publicada_por = :pub_por
+            WHERE id = :id
+        """), {"id": str(agenda_id), "pub_por": str(current_user.id)})
+    else:
+        # Publicação parcial — manter como PRE_AGENDA mas sinalizar
+        await db.execute(sqlt("""
+            UPDATE agendas SET status = 'PUBLICADA', publicada = true,
+                publicada_em = NOW(), publicada_por = :pub_por
+            WHERE id = :id
+        """), {"id": str(agenda_id), "pub_por": str(current_user.id)})
+
+    await db.commit()
+    await registrar_audit(db, "UPDATE",
+        usuario_id=str(current_user.id), usuario_nome=current_user.nome, usuario_email=current_user.email,
+        entidade="agendas", entidade_id=str(agenda_id),
+        descricao=f"Publicação seletiva: {len(item_ids)} itens publicados",
+        ip=request.client.host if request else None,
+    )
+    return {"ok": True, "publicados": len(item_ids)}
+
+
+@router.get("/agenda/{agenda_id}/parametros-horario", tags=["agenda"])
+async def get_parametros_horario(
+    agenda_id: UUID,
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retorna parâmetros de horário para sugestão automática."""
+    from sqlalchemy import text as sqlt
+    res = await db.execute(sqlt("""
+        SELECT p.horario_inicio::text, p.duracao_padrao_min, p.intervalo_entre_visitas_min
+        FROM agendas a
+        JOIN usuarios u ON u.id = a.vendedor_id
+        JOIN parametros_organizacao p ON p.organizacao_id = u.organizacao_id
+        WHERE a.id = :ag_id LIMIT 1
+    """), {"ag_id": str(agenda_id)})
+    row = res.fetchone()
+    if row:
+        return {
+            "horario_inicio": str(row[0])[:5] if row[0] else "08:00",
+            "duracao_min": int(row[1]) if row[1] else 45,
+            "intervalo_min": int(row[2]) if row[2] else 15,
+        }
+    return {"horario_inicio": "08:00", "duracao_min": 45, "intervalo_min": 15}
 
 
 @router.post("/agenda/{agenda_id}/publicar", tags=["agenda"])
