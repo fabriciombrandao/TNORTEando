@@ -1266,6 +1266,7 @@ async def gerar_agenda_ciclo(
     Gera agenda automática para um ESN baseada no ciclo ABC.
     CS/GSN pode gerar para qualquer ESN sob sua hierarquia.
     """
+    import uuid
     from app.services.ciclo_service import gerar_agenda_ciclo as _gerar
     from sqlalchemy import text as sqlt
     from datetime import date as _date
@@ -1304,9 +1305,11 @@ async def gerar_agenda_ciclo(
 
     for dia, itens in por_dia.items():
         # Verificar se já existe agenda para este ESN neste dia
+        from datetime import date as _date2
+        dia_obj = _date2.fromisoformat(str(dia)) if not isinstance(dia, _date2) else dia
         res_ag = await db.execute(sqlt(
             "SELECT id FROM agendas WHERE vendedor_id=:v AND data=:d"
-        ), {"v": esn_id, "d": dia})
+        ), {"v": esn_id, "d": dia_obj})
         ag_row = res_ag.fetchone()
 
         if not ag_row:
@@ -1315,10 +1318,10 @@ async def gerar_agenda_ciclo(
                 INSERT INTO agendas (id, vendedor_id, data, gerada_por, publicada)
                 VALUES (:id, :v, :d, 'CICLO', false)
                 ON CONFLICT (vendedor_id, data) DO NOTHING
-            """), {"id": ag_id, "v": esn_id, "d": dia})
+            """), {"id": ag_id, "v": esn_id, "d": dia_obj})
             res_ag2 = await db.execute(sqlt(
                 "SELECT id FROM agendas WHERE vendedor_id=:v AND data=:d"
-            ), {"v": esn_id, "d": dia})
+            ), {"v": esn_id, "d": dia_obj})
             ag_row = res_ag2.fetchone()
 
         ag_id = str(ag_row[0])
