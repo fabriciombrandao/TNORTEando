@@ -279,23 +279,19 @@ export default function ConfiguracoesPage() {
       </div>
     </div>
 
-      {/* Modal confirmar regeneração */}
-      {confirmarRegenar && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="w-full max-w-sm bg-white rounded-2xl p-6 shadow-xl">
-            <p className="font-bold text-slate-900 mb-2">Regenerar pré-agendas?</p>
-            <p className="text-sm text-slate-500 mb-5">Existem pré-agendas geradas. Deseja gerá-las novamente com os novos parâmetros?</p>
-            <div className="flex gap-3">
-              <button onClick={() => setConfirmarRegenar(false)}
-                className="btn-secondary btn-md flex-1">Não</button>
-              <button onClick={async () => {
-                setConfirmarRegenar(false);
-                // Navegar para agenda
-                window.location.href = "/agenda";
-              }} className="btn-primary btn-md flex-1">Sim</button>
-            </div>
+    {confirmarRegenar && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+        <div className="w-full max-w-sm bg-white rounded-2xl p-6 shadow-xl">
+          <p className="font-bold text-slate-900 mb-2">Regenerar pré-agendas?</p>
+          <p className="text-sm text-slate-500 mb-5">Existem pré-agendas geradas. Deseja gerá-las novamente com os novos parâmetros?</p>
+          <div className="flex gap-3">
+            <button onClick={() => setConfirmarRegenar(false)}
+              className="btn-secondary btn-md flex-1">Não</button>
+            <button onClick={() => { setConfirmarRegenar(false); window.location.href = "/agenda"; }}
+              className="btn-primary btn-md flex-1">Sim</button>
           </div>
         </div>
-      )}
+      </div>
+    )}
   );
 }
