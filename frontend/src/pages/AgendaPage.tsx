@@ -165,7 +165,6 @@ export default function AgendaPage() {
   const [esnSelecionado, setEsnSelecionado] = useState<string>("");
   const [agendaAberta, setAgendaAberta] = useState<any>(null);
   const [esnExpandido, setEsnExpandido] = useState<string | null>(null);
-  const [esnExpandido, setEsnExpandido] = useState<string | null>(null);
   const [gerando, setGerando] = useState(false);
 
   const mes = mesAtual.getMonth() + 1;
