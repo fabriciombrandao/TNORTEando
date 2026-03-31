@@ -181,15 +181,13 @@ export default function AgendaPage() {
     try {
       const esn = esnSelecionado || (isESN ? usuario?.id : "");
       if (!esn && isCS) { toast.error("Selecione um ESN."); return; }
-      // Primeiro dia do próximo mês
-      const proxMes = addMonths(startOfMonth(mesAtual), 1);
-      const dataInicio = format(proxMes, "yyyy-MM-dd");
+      // Gerar para o mês visualizado atualmente
+      const dataInicio = format(startOfMonth(mesAtual), "yyyy-MM-dd");
       const res = await api.post("/api/v1/agenda/gerar-ciclo", {
         esn_id: esn,
         data_inicio: dataInicio,
       });
       toast.success(`${res.data.total} visitas geradas em ${res.data.dias} dias!`);
-      setMesAtual(proxMes);
       setTimeout(() => qc.invalidateQueries({ queryKey: ["agendas"], exact: false }), 100);
     } catch (e: any) {
       toast.error(e.response?.data?.detail || "Erro ao gerar agenda.");
