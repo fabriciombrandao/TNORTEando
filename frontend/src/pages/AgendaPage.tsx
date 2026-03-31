@@ -4,8 +4,8 @@ import api from "../services/api";
 import { useAuthStore } from "../store/auth";
 import toast from "react-hot-toast";
 import {
-  CalendarDays, ChevronLeft, ChevronRight, Zap, Eye,
-  CheckCircle, Circle, Clock, MapPin, Users, Send, Trash2, X
+  CalendarDays, ChevronLeft, ChevronRight, ChevronDown, Zap, Eye,
+  CheckCircle, Circle, Clock, MapPin, Send, Trash2, X
 } from "lucide-react";
 import { format, addMonths, subMonths, startOfMonth } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -164,6 +164,8 @@ export default function AgendaPage() {
   const [mesAtual, setMesAtual] = useState(new Date());
   const [esnSelecionado, setEsnSelecionado] = useState<string>("");
   const [agendaAberta, setAgendaAberta] = useState<any>(null);
+  const [esnExpandido, setEsnExpandido] = useState<string | null>(null);
+  const [esnExpandido, setEsnExpandido] = useState<string | null>(null);
   const [gerando, setGerando] = useState(false);
 
   const mes = mesAtual.getMonth() + 1;
@@ -287,44 +289,57 @@ export default function AgendaPage() {
           <p className="text-slate-300 text-sm mt-1">Clique em "Gerar agenda" para criar automaticamente</p>
         </div>
       ) : isCS ? (
-        /* Visão CS/GSN — por ESN */
-        <div className="space-y-4">
+        /* Visão CS/GSN — cards expansíveis por ESN */
+        <div className="space-y-3">
           {Object.entries(porESN).map(([key, ags]) => {
             const [, nome, cod] = key.split("|");
             const totalVisitas = ags.reduce((s, a) => s + (a.total_itens || 0), 0);
+            const totalConcluidas = ags.reduce((s, a) => s + (a.concluidos || 0), 0);
             const publicadas = ags.filter(a => a.publicada).length;
+            const expandido = esnExpandido === key;
             return (
               <div key={key} className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-                <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-100">
+                <button onClick={() => setEsnExpandido(expandido ? null : key)}
+                  className="w-full flex items-center gap-3 px-5 py-4 hover:bg-slate-50 transition-colors text-left">
                   <div className="w-9 h-9 rounded-xl bg-indigo-100 flex items-center justify-center text-sm font-bold text-indigo-600 flex-shrink-0">
                     {nome.split(" ").slice(0,2).map((n:string) => n[0]).join("")}
                   </div>
                   <div className="flex-1">
                     <p className="font-semibold text-slate-900 text-sm">{nome}</p>
-                    <p className="text-xs text-slate-400">{cod} · {totalVisitas} visitas · {publicadas}/{ags.length} dias publicados</p>
+                    <p className="text-xs text-slate-400 mt-0.5">{cod} · {totalVisitas} visitas · {ags.length} dias · {publicadas} publicados · {totalConcluidas} concluídas</p>
                   </div>
-                </div>
-                <div className="divide-y divide-slate-50">
-                  {ags.map((ag: any) => (
-                    <div key={ag.id} className="flex items-center gap-3 px-5 py-3">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm font-medium text-slate-800">
-                            {format(new Date(ag.data + "T12:00:00"), "EEEE, d 'de' MMMM", { locale: ptBR })}
-                          </p>
-                          <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${STATUS_BADGE[ag.status] || STATUS_BADGE.RASCUNHO}`}>
-                            {ag.status || "PRÉ-AGENDA"}
-                          </span>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {publicadas > 0 && (
+                      <span className="text-xs bg-emerald-50 text-emerald-700 font-semibold px-2 py-0.5 rounded-full">
+                        {publicadas} publicado{publicadas !== 1 ? "s" : ""}
+                      </span>
+                    )}
+                    <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${expandido ? "rotate-180" : ""}`} />
+                  </div>
+                </button>
+                {expandido && (
+                  <div className="border-t border-slate-100 divide-y divide-slate-50">
+                    {ags.map((ag: any) => (
+                      <div key={ag.id} className="flex items-center gap-3 px-5 py-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="text-sm font-medium text-slate-800">
+                              {format(new Date(ag.data + "T12:00:00"), "EEE, d 'de' MMM", { locale: ptBR })}
+                            </p>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${STATUS_BADGE[ag.status] || STATUS_BADGE.RASCUNHO}`}>
+                              {statusLabel(ag.status)}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-400 mt-0.5">{ag.total_itens} visita{ag.total_itens !== 1 ? "s" : ""} · {ag.concluidos} concluída{ag.concluidos !== 1 ? "s" : ""}</p>
                         </div>
-                        <p className="text-xs text-slate-400 mt-0.5">{ag.total_itens} visitas · {ag.concluidos} concluídas</p>
+                        <button onClick={() => setAgendaAberta(ag)}
+                          className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:bg-indigo-50 hover:text-indigo-600">
+                          <Eye className="w-4 h-4" />
+                        </button>
                       </div>
-                      <button onClick={() => setAgendaAberta(ag)}
-                        className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:bg-indigo-50 hover:text-indigo-600">
-                        <Eye className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}

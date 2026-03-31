@@ -1430,7 +1430,7 @@ async def excluir_pre_agenda(
           AND EXTRACT(MONTH FROM data) = :mes
           AND EXTRACT(YEAR FROM data) = :ano
           AND (publicada = false OR publicada IS NULL)
-          AND (status = 'RASCUNHO' OR status IS NULL)
+          AND (status IN ('RASCUNHO', 'PRE_AGENDA') OR status IS NULL)
     """), {"esn_id": esn_id, "mes": mes, "ano": ano})
     ids = [str(r[0]) for r in res.fetchall()]
 
