@@ -229,9 +229,16 @@ export default function ClientesPage() {
                             <p className="text-slate-700 font-medium">
                               {vendedor.nome.split(" ")[0]} {vendedor.nome.split(" ").slice(-1)}
                             </p>
-                            {vendedor.codigo_externo && (
-                              <p className="text-xs text-slate-400 font-mono">{vendedor.codigo_externo}</p>
-                            )}
+                            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                              {vendedor.codigo_externo && (
+                                <span className="text-xs text-slate-400 font-mono">{vendedor.codigo_externo}</span>
+                              )}
+                              {vendedor.papel === "ESN" && (
+                                <span className="px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600 font-bold text-xs">
+                                  {({"BASE":"Base","NOVOS":"Novos","BASE_NOVOS":"Base+Novos"} as Record<string,string>)[vendedor.tipo_esn||"BASE"]||"Base"}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         ) : (
                           <span className="text-slate-400 text-xs">Não atribuído</span>
