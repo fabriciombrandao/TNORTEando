@@ -28,7 +28,10 @@ async def get_parametros(
             COALESCE(agrupar_por_municipio, true) as agrupar_municipio,
             COALESCE(max_municipios_por_dia, 1)  as max_municipios,
             COALESCE(duracao_padrao_min, 45)     as duracao_min,
-            COALESCE(intervalo_entre_visitas_min, 15) as intervalo_min
+            COALESCE(intervalo_entre_visitas_min, 15) as intervalo_min,
+            COALESCE(visitas_manha_max, 1)       as visitas_manha_max,
+            COALESCE(visitas_tarde_max, 1)       as visitas_tarde_max,
+            COALESCE(max_visitas_base_novos, 1)  as max_visitas_base_novos
         FROM parametros_organizacao
         WHERE organizacao_id = :org_id
         LIMIT 1
@@ -48,6 +51,9 @@ async def get_parametros(
             "max_municipios": int(row[8]),
             "duracao_min": int(row[9]),
             "intervalo_min": int(row[10]),
+            "visitas_manha_max": int(row[11]) if len(row) > 11 and row[11] else 1,
+            "visitas_tarde_max": int(row[12]) if len(row) > 12 and row[12] else 1,
+            "max_visitas_base_novos": int(row[13]) if len(row) > 13 and row[13] else 1,
         }
 
     return {
@@ -55,6 +61,7 @@ async def get_parametros(
         "ciclo_dias": 45, "visitas_por_dia": 4, "horizonte_dias": 30,
         "freq_padrao": 30, "agrupar_municipio": True, "max_municipios": 1,
         "duracao_min": 45, "intervalo_min": 15,
+        "visitas_manha_max": 1, "visitas_tarde_max": 1, "max_visitas_base_novos": 1,
     }
 
 
@@ -94,7 +101,8 @@ async def get_expediente(db: AsyncSession, org_id: str) -> Dict[int, Dict]:
     return expediente
 
 
-def _slots_disponiveis(expediente_dia: Dict, duracao_min: int, intervalo_min: int) -> List[str]:
+def _slots_disponiveis(expediente_dia: Dict, duracao_min: int, intervalo_min: int,
+                        max_manha: int = 99, max_tarde: int = 99) -> List[str]:
     """Calcula slots de horário disponíveis em um dia considerando manhã e tarde."""
     if not expediente_dia.get("ativo", False):
         return []
@@ -102,11 +110,11 @@ def _slots_disponiveis(expediente_dia: Dict, duracao_min: int, intervalo_min: in
     slots = []
     slot_min = duracao_min + intervalo_min
 
-    def slots_turno(inicio: time, fim: time) -> List[str]:
+    def slots_turno(inicio: time, fim: time, max_slots: int) -> List[str]:
         turno_slots = []
         atual = inicio.hour * 60 + inicio.minute
         fim_min = fim.hour * 60 + fim.minute
-        while atual + duracao_min <= fim_min:
+        while atual + duracao_min <= fim_min and len(turno_slots) < max_slots:
             h, m = divmod(atual, 60)
             turno_slots.append(f"{h:02d}:{m:02d}")
             atual += slot_min
@@ -118,9 +126,9 @@ def _slots_disponiveis(expediente_dia: Dict, duracao_min: int, intervalo_min: in
     tf = expediente_dia["tarde_fim"]
 
     if mi and mf:
-        slots.extend(slots_turno(mi, mf))
+        slots.extend(slots_turno(mi, mf, max_manha))
     if ti and tf:
-        slots.extend(slots_turno(ti, tf))
+        slots.extend(slots_turno(ti, tf, max_tarde))
 
     return slots
 
@@ -257,6 +265,13 @@ async def gerar_agenda_ciclo(
     agenda: Dict[date, List[dict]] = {}
     municipios_por_dia: Dict[date, set] = {}
 
+    # Buscar tipo_esn do executivo
+    res_esn = await db.execute(sqlt(
+        "SELECT tipo_esn FROM usuarios WHERE id = :id LIMIT 1"
+    ), {"id": esn_id})
+    esn_row = res_esn.fetchone()
+    tipo_esn = (esn_row[0] or "BASE") if esn_row else "BASE"
+
     for visita in visitas_necessarias:
         dia_candidato = _proximo_dia_util(visita["proxima"], feriados, expediente)
 
@@ -268,16 +283,28 @@ async def gerar_agenda_ciclo(
             visitas_do_dia = agenda.get(dia_candidato, [])
             municipios_do_dia = municipios_por_dia.get(dia_candidato, set())
 
-            # Verificar slots disponíveis no expediente
+            # Verificar slots disponíveis respeitando max por turno
             dia_semana = dia_candidato.isoweekday() % 7
             exp_dia = expediente.get(dia_semana, {})
-            slots = _slots_disponiveis(exp_dia, params["duracao_min"], params["intervalo_min"])
+            max_manha = params.get("visitas_manha_max", 1)
+            max_tarde = params.get("visitas_tarde_max", 1)
+            slots = _slots_disponiveis(exp_dia, params["duracao_min"], params["intervalo_min"],
+                                       max_manha=max_manha, max_tarde=max_tarde)
 
             max_visitas = min(params["visitas_por_dia"], len(slots))
             if len(visitas_do_dia) >= max_visitas:
                 dia_candidato = _proximo_dia_util(dia_candidato + timedelta(days=1), feriados, expediente)
                 tentativas += 1
                 continue
+
+            # Regra ESN tipo NOVOS: max 1 visita de base por dia
+            if tipo_esn in ("NOVOS", "BASE_NOVOS"):
+                visitas_base_dia = [v for v in visitas_do_dia if not v.get("is_novo", False)]
+                max_base = params.get("max_visitas_base_novos", 1)
+                if len(visitas_base_dia) >= max_base:
+                    dia_candidato = _proximo_dia_util(dia_candidato + timedelta(days=1), feriados, expediente)
+                    tentativas += 1
+                    continue
 
             mun = visita["municipio"]
             if params["agrupar_municipio"] and mun:

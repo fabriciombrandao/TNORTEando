@@ -59,6 +59,9 @@ export default function ConfiguracoesPage() {
     horizonte_dias: 30,
     duracao_padrao_min: 45,
     intervalo_min: 15,
+    visitas_manha_max: 1,
+    visitas_tarde_max: 1,
+    max_visitas_base_novos: 1,
   });
 
   useEffect(() => {
@@ -170,6 +173,12 @@ export default function ConfiguracoesPage() {
           <div className="card-body">
             <Campo label="Visitas por dia" desc="Máximo de visitas por executivo por dia"
               suffix="visitas" value={form.visitas_por_dia_max} onChange={set("visitas_por_dia_max")} />
+            <Campo label="Visitas manhã" desc="Máximo de visitas no período da manhã por dia"
+              suffix="visitas" value={form.visitas_manha_max} onChange={set("visitas_manha_max")} />
+            <Campo label="Visitas tarde" desc="Máximo de visitas no período da tarde por dia"
+              suffix="visitas" value={form.visitas_tarde_max} onChange={set("visitas_tarde_max")} />
+            <Campo label="Base p/ ESN Novos" desc="Máximo de visitas de base por dia para executivos tipo Novos"
+              suffix="visitas" value={form.max_visitas_base_novos} onChange={set("max_visitas_base_novos")} />
             <Campo label="Raio de check-in" desc="Distância máxima permitida para check-in"
               suffix="metros" value={form.raio_checkin_metros} onChange={set("raio_checkin_metros")} />
             <Campo label="Frequência padrão" desc="Dias padrão entre visitas quando não há regra específica"
