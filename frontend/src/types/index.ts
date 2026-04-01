@@ -6,6 +6,7 @@ export interface Usuario {
   email: string;
   papel: Papel;
   codigo_externo?: string;
+  tipo_esn?: string;
   telefone?: string;
   ativo: boolean;
   primeiro_acesso?: boolean;
