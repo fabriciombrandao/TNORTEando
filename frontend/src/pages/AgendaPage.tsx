@@ -381,8 +381,7 @@ function CalendarioView({ mesAtual, setMesAtual, esns, esnSelecionado, setEsnSel
                 </div>
                 <p className="text-xs text-slate-500 mb-2">{ag.total_itens} visitas · {ag.concluidos} concluídas</p>
                 <button onClick={() => setDiaSelecionado({ _agenda: ag, ...diaSelecionado })}
-                  className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg text-xs font-semibold hover:bg-indigo-100"
-                  onClick={() => { /* abrir modal */ }}>
+                  className="w-full flex items-center justify-center gap-1.5 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg text-xs font-semibold hover:bg-indigo-100">
                   <Eye className="w-3 h-3" /> Ver visitas
                 </button>
               </div>
