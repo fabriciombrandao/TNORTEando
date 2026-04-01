@@ -161,9 +161,9 @@ export default function ClientesPage() {
                         {vendedor.codigo_externo && (
                           <span className="text-slate-400 font-mono">· {vendedor.codigo_externo}</span>
                         )}
-                        {vendedor.tipo_esn && (
-                          <span className="px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-500 font-semibold">
-                            {({"BASE": "Base", "NOVOS": "Novos", "BASE_NOVOS": "Base+Novos"} as Record<string,string>)[vendedor.tipo_esn] || vendedor.tipo_esn}
+                        {vendedor.papel === "ESN" && (
+                          <span className="px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600 font-bold text-xs">
+                            {({"BASE": "Base", "NOVOS": "Novos", "BASE_NOVOS": "Base+Novos"} as Record<string,string>)[vendedor.tipo_esn || "BASE"] || "Base"}
                           </span>
                         )}
                       </span>
