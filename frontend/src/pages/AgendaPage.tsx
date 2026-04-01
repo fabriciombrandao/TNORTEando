@@ -253,15 +253,24 @@ function VisaoMes({ mesAtual, agendas, onDiaClick }: any) {
                   {format(dia, "d")}
                 </div>
                 <div className="space-y-0.5">
-                  {ags.slice(0, 3).map((ag: any) => {
+                  {ags.slice(0, 1).map((ag: any) => {
                     const cor = corStatus(ag.status);
+                    const itens = (ag.itens_resumo || []).slice(0, 3);
                     return (
-                      <div key={ag.id} className={`text-xs px-1.5 py-0.5 rounded font-semibold truncate ${cor.bg} ${cor.text}`}>
-                        {ag.total_itens}v {ag.codigo_externo}
+                      <div key={ag.id}>
+                        {itens.map((it: any, i: number) => (
+                          <div key={i} className={`text-xs px-1.5 py-0.5 rounded mb-0.5 truncate border-l-2 ${cor.border} ${cor.bg} ${cor.text}`}>
+                            {it.horario && <span className="font-bold">{it.horario} </span>}
+                            {it.razao_social.split(" ")[0]}
+                          </div>
+                        ))}
+                        {(ag.itens_resumo || []).length > 3 && (
+                          <div className="text-xs text-slate-400 pl-1">+{(ag.itens_resumo || []).length - 3} mais</div>
+                        )}
                       </div>
                     );
                   })}
-                  {ags.length > 3 && <div className="text-xs text-slate-400 pl-1">+{ags.length - 3}</div>}
+                  {ags.length > 1 && <div className="text-xs text-slate-400 pl-1">+{ags.length - 1} dias</div>}
                 </div>
               </div>
             );
@@ -351,10 +360,18 @@ function VisaoSemana({ dataAtual, agendas, onDiaClick }: any) {
                   const h = ag.primeiro_horario || "08:00";
                   const top = (minutosDesdeMeia(h) - HORA_BASE) / 60 * PX_HORA;
                   return (
-                    <div key={ag.id} onClick={() => onDiaClick(ag)}
-                      className={`absolute left-1 right-1 rounded-lg px-2 py-1 cursor-pointer border-l-2 ${cor.bg} ${cor.border} hover:opacity-80`}
+                    <div key={ag.id} onClick={(e) => { e.stopPropagation(); onDiaClick(ag); }}
+                      className={`absolute left-1 right-1 rounded-lg px-1.5 py-1 cursor-pointer border-l-2 ${cor.bg} ${cor.border} hover:opacity-80 overflow-hidden`}
                       style={{ top: Math.max(0, top), minHeight: 22 }}>
-                      <p className={`text-xs font-bold truncate ${cor.text}`}>{ag.total_itens}v</p>
+                      {(ag.itens_resumo || []).slice(0, 4).map((it: any, i: number) => (
+                        <div key={i} className={`text-xs font-semibold truncate ${cor.text}`}>
+                          {it.horario && <span className="font-bold">{it.horario} </span>}
+                          {it.razao_social.split(" ")[0]}
+                        </div>
+                      ))}
+                      {(ag.itens_resumo || []).length > 4 && (
+                        <div className={`text-xs ${cor.text} opacity-60`}>+{(ag.itens_resumo || []).length - 4}</div>
+                      )}
                     </div>
                   );
                 })}

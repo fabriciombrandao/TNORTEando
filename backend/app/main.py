@@ -1494,10 +1494,11 @@ async def listar_agendas(
                a.gerada_por, a.publicada_em,
                u.nome as vendedor_nome, u.codigo_externo,
                COUNT(ai.id) as total_itens,
-               SUM(CASE WHEN ai.status = 'CONCLUIDO' THEN 1 ELSE 0 END) as concluidos
+               SUM(CASE WHEN ai.status = 'CONCLUIDO' THEN 1 ELSE 0 END) as concluidos,
+               MIN(ai.horario_previsto) as primeiro_horario
         FROM agendas a
         JOIN usuarios u ON u.id = a.vendedor_id
-        LEFT JOIN agenda_itens ai ON ai.agenda_id = a.id
+        LEFT JOIN agenda_itens ai ON ai.agenda_id = a.id AND ai.status != 'CANCELADO'
         {where_sql}
         GROUP BY a.id, a.vendedor_id, a.data, a.status, a.publicada,
                  a.gerada_por, a.publicada_em, u.nome, u.codigo_externo
@@ -1505,6 +1506,29 @@ async def listar_agendas(
     """), params)
 
     rows = res.fetchall()
+    agenda_ids = [str(r[0]) for r in rows]
+
+    # Buscar resumo dos itens (horario + cliente) para exibir na grade
+    itens_resumo: dict = {}
+    if agenda_ids:
+        placeholders = ",".join([f"'{i}'" for i in agenda_ids])
+        res_itens = await db.execute(sqlt(f"""
+            SELECT ai.agenda_id, ai.horario_previsto, c.razao_social
+            FROM agenda_itens ai
+            JOIN clientes c ON c.id = ai.cliente_id
+            WHERE ai.agenda_id IN ({placeholders})
+              AND ai.status != 'CANCELADO'
+            ORDER BY ai.agenda_id, ai.horario_previsto
+        """))
+        for ri in res_itens.fetchall():
+            aid = str(ri[0])
+            if aid not in itens_resumo:
+                itens_resumo[aid] = []
+            itens_resumo[aid].append({
+                "horario": ri[1] or "",
+                "razao_social": ri[2] or "",
+            })
+
     return [
         {
             "id": str(r[0]), "vendedor_id": str(r[1]), "data": str(r[2]),
@@ -1512,6 +1536,8 @@ async def listar_agendas(
             "gerada_por": r[5], "publicada_em": str(r[6]) if r[6] else None,
             "vendedor_nome": r[7], "codigo_externo": r[8],
             "total_itens": int(r[9] or 0), "concluidos": int(r[10] or 0),
+            "primeiro_horario": r[11] or None,
+            "itens_resumo": itens_resumo.get(str(r[0]), []),
         }
         for r in rows
     ]
