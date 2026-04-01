@@ -90,7 +90,7 @@ async def login(form: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = 
     return TokenResponse(
         access_token=create_access_token(str(user.id)),
         refresh_token=create_refresh_token(str(user.id)),
-        usuario={"id": str(user.id), "nome": user.nome, "papel": user.papel, "email": user.email, "codigo_externo": user.codigo_externo, "primeiro_acesso": bool(user.primeiro_acesso)},
+        usuario={"id": str(user.id), "nome": user.nome, "papel": user.papel, "email": user.email, "codigo_externo": user.codigo_externo, "primeiro_acesso": bool(user.primeiro_acesso), "tipo_esn": user.tipo_esn if hasattr(user, "tipo_esn") else None},
     )
 
 @router.post("/auth/logout", tags=["auth"])
@@ -118,6 +118,7 @@ async def me(current_user: Usuario = Depends(get_current_user)):
         "email": current_user.email,
         "papel": current_user.papel,
         "codigo_externo": current_user.codigo_externo,
+        "tipo_esn": current_user.tipo_esn if hasattr(current_user, "tipo_esn") else None,
     }
 
 # ─────────────────────────────────────────────
@@ -399,7 +400,7 @@ async def listar_usuarios(
         params["papel"] = papel.upper()
     where_sql = "WHERE " + " AND ".join(where) if where else ""
     res = await db.execute(sqlt(f"""
-        SELECT id, codigo_externo, nome, email, papel, telefone, ativo, primeiro_acesso
+        SELECT id, codigo_externo, nome, email, papel, telefone, ativo, primeiro_acesso, tipo_esn
         FROM usuarios
         {where_sql}
         ORDER BY nome
@@ -415,6 +416,7 @@ async def listar_usuarios(
             "telefone": r[5],
             "ativo": bool(r[6]),
             "primeiro_acesso": bool(r[7]) if r[7] is not None else False,
+            "tipo_esn": r[8] or "BASE",
         }
         for r in rows
     ]
@@ -442,6 +444,11 @@ async def editar_usuario(
         updates.append("telefone = :telefone"); params["telefone"] = body["telefone"]
     if "papel" in body:
         updates.append("papel = :papel"); params["papel"] = body["papel"]
+    # tipo_esn — editável por ADMIN/GESTOR/DSN/GSN
+    papel_atual = current_user.papel.value if hasattr(current_user.papel, "value") else str(current_user.papel)
+    if "tipo_esn" in body and papel_atual in ("ADMIN","GESTOR_CONSOLIDADORA","GESTOR_EMPRESA","DSN","GSN"):
+        if body["tipo_esn"] in ("BASE","NOVOS","BASE_NOVOS"):
+            updates.append("tipo_esn = :tipo_esn"); params["tipo_esn"] = body["tipo_esn"]
     if not updates:
         raise HTTPException(status_code=400, detail="Nenhum campo para atualizar.")
     res_antes = await db.execute(sqlt("SELECT nome, email, papel, telefone FROM usuarios WHERE id = :id"), {"id": str(usuario_id)})
@@ -550,6 +557,7 @@ async def meu_perfil(
     return {
         "id": str(current_user.id),
         "codigo_externo": current_user.codigo_externo,
+        "tipo_esn": current_user.tipo_esn if hasattr(current_user, "tipo_esn") else None,
         "nome": current_user.nome,
         "email": current_user.email,
         "papel": current_user.papel,

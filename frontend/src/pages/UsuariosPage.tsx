@@ -24,7 +24,7 @@ const PAPEIS = [
 ];
 const ORDEM = ["ADMIN","GESTOR_CONSOLIDADORA","GESTOR_EMPRESA","DSN","GSN","ESN"];
 
-const FORM_VAZIO = { nome:"", email:"", codigo_externo:"", papel:"ESN", telefone:"", senha:"Mudar@123" };
+const FORM_VAZIO = { nome:"", email:"", codigo_externo:"", papel:"ESN", telefone:"", senha:"Mudar@123", tipo_esn:"BASE" };
 
 function BadgePapel({ papel }: { papel: string }) {
   const p = PAPEIS.find(p => p.value === papel);
@@ -46,6 +46,7 @@ function Avatar({ nome, ativo }: { nome: string; ativo: boolean }) {
 
 function ModalForm({ titulo, form, setForm, onSalvar, onFechar, isPending, isEdicao }: any) {
   const [mostrarSenha, setMostrarSenha] = useState(false);
+  const podeEditarTipo = ["ADMIN","GESTOR_CONSOLIDADORA","GESTOR_EMPRESA","DSN","GSN"].includes(papelAtual || "");
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 px-4 pb-4 sm:pb-0"
          onClick={onFechar}>
@@ -82,6 +83,21 @@ function ModalForm({ titulo, form, setForm, onSalvar, onFechar, isPending, isEdi
               <label className="label mb-1.5 block">Telefone</label>
               <input value={form.telefone} onChange={(e:any) => setForm((f:any) => ({...f, telefone: e.target.value}))}
                 className="input" placeholder="(63) 99999-9999" />
+            </div>
+            {form.papel === "ESN" && (
+            <div>
+              <label className="label mb-1.5 block">Tipo de atuação</label>
+              {podeEditarTipo ? (
+                <select value={form.tipo_esn || "BASE"} onChange={(e:any) => setForm((f:any) => ({...f, tipo_esn: e.target.value}))} className="input">
+                  <option value="BASE">Base — Somente clientes existentes</option>
+                  <option value="NOVOS">Novos — Foco em novos clientes</option>
+                  <option value="BASE_NOVOS">Base + Novos — Ambos</option>
+                </select>
+              ) : (
+                <div className="input bg-slate-50 text-slate-600">
+                  {{ BASE: "Base", NOVOS: "Novos", BASE_NOVOS: "Base + Novos" }[form.tipo_esn || "BASE"]}
+                </div>
+              )}
             </div>
           </div>
           {!isEdicao && (
@@ -249,7 +265,7 @@ export default function UsuariosPage() {
   })).filter(g => g.usuarios.length > 0);
 
   function abrirEditar(u: any) {
-    setFormEditar({ nome: u.nome, email: u.email, codigo_externo: u.codigo_externo||"",
+    setFormEditar({ nome: u.nome, email: u.email, codigo_externo: u.codigo_externo||"", tipo_esn: u.tipo_esn||"BASE",
       papel: u.papel, telefone: u.telefone||"", senha: "" });
     setModalEditar(u);
     setMenuAberto(null);
