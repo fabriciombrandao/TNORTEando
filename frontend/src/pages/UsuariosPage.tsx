@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "../services/api";
+import { useAuthStore } from "../store/auth";
 import toast from "react-hot-toast";
 import {
   Users, Plus, Shield, X, Eye, EyeOff,
@@ -46,7 +47,8 @@ function Avatar({ nome, ativo }: { nome: string; ativo: boolean }) {
 
 function ModalForm({ titulo, form, setForm, onSalvar, onFechar, isPending, isEdicao }: any) {
   const [mostrarSenha, setMostrarSenha] = useState(false);
-  const podeEditarTipo = ["ADMIN","GESTOR_CONSOLIDADORA","GESTOR_EMPRESA","DSN","GSN"].includes(papelAtual || "");
+  const { usuario: usuarioLogado } = useAuthStore();
+  const podeEditarTipo = ["ADMIN","GESTOR_CONSOLIDADORA","GESTOR_EMPRESA","DSN","GSN"].includes(usuarioLogado?.papel || "");
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 px-4 pb-4 sm:pb-0"
          onClick={onFechar}>
@@ -95,7 +97,7 @@ function ModalForm({ titulo, form, setForm, onSalvar, onFechar, isPending, isEdi
                 </select>
               ) : (
                 <div className="input bg-slate-50 text-slate-600">
-                  {{ BASE: "Base", NOVOS: "Novos", BASE_NOVOS: "Base + Novos" }[form.tipo_esn || "BASE"]}
+                  {({"BASE": "Base", "NOVOS": "Novos", "BASE_NOVOS": "Base + Novos"} as Record<string,string>)[form.tipo_esn || "BASE"]}
                 </div>
               )}
             </div>
