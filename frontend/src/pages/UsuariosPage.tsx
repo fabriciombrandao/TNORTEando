@@ -99,6 +99,7 @@ function ModalForm({ titulo, form, setForm, onSalvar, onFechar, isPending, isEdi
                 </div>
               )}
             </div>
+            )}
           </div>
           {!isEdicao && (
             <div>
