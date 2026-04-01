@@ -155,11 +155,16 @@ export default function ClientesPage() {
                       )}
                     </div>
                     {vendedor && (
-                      <span className="text-xs text-indigo-500 flex items-center gap-1 mt-1">
+                      <span className="text-xs text-indigo-500 flex items-center gap-1 mt-1 flex-wrap">
                         <User className="w-3 h-3" />
                         {vendedor.nome.split(" ")[0]} {vendedor.nome.split(" ").slice(-1)}
                         {vendedor.codigo_externo && (
                           <span className="text-slate-400 font-mono">· {vendedor.codigo_externo}</span>
+                        )}
+                        {vendedor.tipo_esn && (
+                          <span className="px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-500 font-semibold">
+                            {({"BASE": "Base", "NOVOS": "Novos", "BASE_NOVOS": "Base+Novos"} as Record<string,string>)[vendedor.tipo_esn] || vendedor.tipo_esn}
+                          </span>
                         )}
                       </span>
                     )}

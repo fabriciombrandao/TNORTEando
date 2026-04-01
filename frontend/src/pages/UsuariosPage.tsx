@@ -340,7 +340,14 @@ export default function UsuariosPage() {
                       </div>
                       <p className="text-xs text-slate-400 mt-0.5">{u.email}</p>
                       {u.codigo_externo && (
-                        <p className="text-xs text-slate-400 font-mono mt-0.5">{u.codigo_externo}</p>
+                        <p className="text-xs text-slate-400 font-mono mt-0.5">
+                          {u.codigo_externo}
+                          {u.papel === "ESN" && u.tipo_esn && (
+                            <span className="ml-2 px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600 text-xs font-semibold">
+                              {({"BASE": "Base", "NOVOS": "Novos", "BASE_NOVOS": "Base+Novos"} as Record<string,string>)[u.tipo_esn] || u.tipo_esn}
+                            </span>
+                          )}
+                        </p>
                       )}
                     </div>
 

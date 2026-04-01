@@ -562,7 +562,11 @@ function TelaCalendario({ esn, agendas, dataAtual, setDataAtual, visao, setVisao
         </button>
         <div className="flex-1 min-w-0">
           <p className="font-bold text-slate-900 truncate">{esn.nome}</p>
-          <p className="text-xs text-slate-400">{esn.codigo_externo} · {totalVisitas} visitas · {publicadas}/{(agendas as any[]).length} dias pub.</p>
+          <p className="text-xs text-slate-400">
+            {esn.codigo_externo}
+            {esn.tipo_esn && <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-500 font-semibold">{({"BASE": "Base", "NOVOS": "Novos", "BASE_NOVOS": "Base+Novos"} as Record<string,string>)[esn.tipo_esn] || esn.tipo_esn}</span>}
+            {" · "}{totalVisitas} visitas · {publicadas}/{(agendas as any[]).length} dias pub.
+          </p>
         </div>
         <div className="flex gap-2">
           <button onClick={() => excluirPre(esn.id)} className="flex items-center gap-1 px-2 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-semibold hover:bg-red-100">
