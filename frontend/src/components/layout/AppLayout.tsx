@@ -244,6 +244,7 @@ function DesktopLayout({ children }: { children: React.ReactNode }) {
                 <p className="text-xs text-slate-400 truncate">
                   {usuario?.papel}
                   {(perfil?.codigo_externo || usuario?.codigo_externo) ? ` · ${perfil?.codigo_externo || usuario?.codigo_externo}` : ""}
+                  {usuario?.papel === "ESN" && usuario?.tipo_esn ? ` · ${({"BASE": "Base", "NOVOS": "Novos", "BASE_NOVOS": "Base+Novos"} as Record<string,string>)[usuario.tipo_esn] || usuario.tipo_esn}` : ""}
                 </p>
               </div>
             )}

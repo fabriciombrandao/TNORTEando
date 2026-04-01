@@ -246,7 +246,12 @@ export default function ClienteDetalhe() {
                     {vendedor.codigo_externo && (
                       <p className="text-xs text-slate-400 font-mono">{vendedor.codigo_externo}</p>
                     )}
-                    <p className="text-xs text-slate-400">{vendedor.email}</p>
+                    {vendedor.tipo_esn && (
+                      <span className="inline-block mt-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">
+                        {({"BASE": "Base", "NOVOS": "Novos", "BASE_NOVOS": "Base+Novos"} as Record<string,string>)[vendedor.tipo_esn] || vendedor.tipo_esn}
+                      </span>
+                    )}
+                    <p className="text-xs text-slate-400 mt-0.5">{vendedor.email}</p>
                   </div>
                 </div>
               ) : <p className="text-slate-400 text-sm">Não atribuído</p>}

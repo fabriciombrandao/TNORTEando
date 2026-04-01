@@ -1126,13 +1126,13 @@ async def listar_esns_do_cs(
 
     # Buscar ESNs sob o GSN
     res = await db.execute(sqlt("""
-        SELECT u.id, u.nome, u.codigo_externo, u.email
+        SELECT u.id, u.nome, u.codigo_externo, u.email, u.tipo_esn
         FROM usuarios u
         JOIN hierarquia_vendas hv ON hv.subordinado_id = u.id
         WHERE hv.superior_id = :gsn_id AND u.papel = 'ESN' AND u.ativo = true
         ORDER BY u.nome
     """), {"gsn_id": gsn_id})
-    return [{"id": str(r[0]), "nome": r[1], "codigo_externo": r[2], "email": r[3]} for r in res.fetchall()]
+    return [{"id": str(r[0]), "nome": r[1], "codigo_externo": r[2], "email": r[3], "tipo_esn": r[4] or "BASE"} for r in res.fetchall()]
 
 
 @router.get("/visitas/historico", tags=["visitas"])

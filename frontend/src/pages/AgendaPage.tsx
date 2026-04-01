@@ -500,7 +500,13 @@ function TelaESNs({ esns, agendas, mes, ano, onESNClick, gerarAgenda, gerando }:
               </div>
               <div className="flex-1 min-w-0">
                 <p className="font-bold text-slate-900">{esn.nome}</p>
-                <p className="text-xs text-slate-400 mt-0.5">{esn.codigo_externo}</p>
+                <p className="text-xs text-slate-400 mt-0.5">{esn.codigo_externo}
+                  {esn.tipo_esn && (
+                    <span className="ml-2 px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600 text-xs font-semibold">
+                      {({"BASE": "Base", "NOVOS": "Novos", "BASE_NOVOS": "Base+Novos"} as Record<string,string>)[esn.tipo_esn] || esn.tipo_esn}
+                    </span>
+                  )}
+                </p>
                 <div className="flex gap-2 mt-2 flex-wrap">
                   {pre > 0 && <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{pre} pré-agenda{pre !== 1 ? "s" : ""}</span>}
                   {stats.pub > 0 && <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">{stats.pub} publicada{stats.pub !== 1 ? "s" : ""}</span>}
