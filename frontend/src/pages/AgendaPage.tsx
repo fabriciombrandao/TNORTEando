@@ -553,6 +553,17 @@ function TelaCalendario({ esn, agendas, dataAtual, setDataAtual, visao, setVisao
   const totalVisitas = (agendas as any[]).reduce((s: number, a: any) => s + (a.total_itens || 0), 0);
   const publicadas = (agendas as any[]).filter((a: any) => a.publicada).length;
 
+  const { data: googleStatus } = useQuery({
+    queryKey: ["google-status", esn?.id],
+    queryFn: () => api.get("/api/v1/auth/google/status").then(r => r.data),
+    enabled: !!esn?.id,
+  });
+
+  async function conectarGoogle() {
+    const res = await api.get("/api/v1/auth/google/authorize");
+    window.location.href = res.data.url;
+  }
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -568,7 +579,16 @@ function TelaCalendario({ esn, agendas, dataAtual, setDataAtual, visao, setVisao
             {" · "}{totalVisitas} visitas · {publicadas}/{(agendas as any[]).length} dias pub.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          {googleStatus?.conectado ? (
+            <span className="flex items-center gap-1 px-2 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-semibold">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span> Google
+            </span>
+          ) : (
+            <button onClick={conectarGoogle} className="flex items-center gap-1 px-2 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-xs font-semibold hover:bg-slate-200">
+              🗓 Conectar Google
+            </button>
+          )}
           <button onClick={() => excluirPre(esn.id)} className="flex items-center gap-1 px-2 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-semibold hover:bg-red-100">
             <Trash2 className="w-3 h-3" /> Excluir
           </button>

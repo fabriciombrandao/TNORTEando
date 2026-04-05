@@ -1102,6 +1102,173 @@ async def agenda_hoje(
     }
 
 
+
+
+# ─────────────────────────────────────────────
+# Google Calendar OAuth
+# ─────────────────────────────────────────────
+
+@router.get("/auth/google/authorize", tags=["google"])
+async def google_authorize(
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Gera URL de autorização do Google OAuth."""
+    import os
+    from google_auth_oauthlib.flow import Flow
+
+    client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
+    client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+    redirect_uri = os.environ.get("GOOGLE_REDIRECT_URI", "")
+
+    if not client_id or not client_secret:
+        raise HTTPException(status_code=500, detail="Credenciais Google não configuradas.")
+
+    flow = Flow.from_client_config(
+        {
+            "web": {
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "redirect_uris": [redirect_uri],
+            }
+        },
+        scopes=[
+            "https://www.googleapis.com/auth/calendar",
+            "https://www.googleapis.com/auth/userinfo.email",
+            "openid",
+        ],
+    )
+    flow.redirect_uri = redirect_uri
+
+    auth_url, state = flow.authorization_url(
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt="consent",
+        state=str(current_user.id),
+    )
+    return {"url": auth_url}
+
+
+@router.get("/auth/google/callback", tags=["google"])
+async def google_callback(
+    code: str,
+    state: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Recebe callback do Google, troca code por tokens e salva."""
+    import os
+    from google_auth_oauthlib.flow import Flow
+    from datetime import datetime as dt
+    from sqlalchemy import text as sqlt
+
+    client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
+    client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+    redirect_uri = os.environ.get("GOOGLE_REDIRECT_URI", "")
+
+    flow = Flow.from_client_config(
+        {
+            "web": {
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "redirect_uris": [redirect_uri],
+            }
+        },
+        scopes=[
+            "https://www.googleapis.com/auth/calendar",
+            "https://www.googleapis.com/auth/userinfo.email",
+            "openid",
+        ],
+        state=state,
+    )
+    flow.redirect_uri = redirect_uri
+
+    try:
+        flow.fetch_token(code=code)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Erro ao trocar token: {str(e)}")
+
+    credentials = flow.credentials
+
+    # Buscar email do Google
+    import google.oauth2.credentials
+    import googleapiclient.discovery
+    user_info_service = googleapiclient.discovery.build(
+        "oauth2", "v2",
+        credentials=google.oauth2.credentials.Credentials(
+            token=credentials.token,
+            refresh_token=credentials.refresh_token,
+            token_uri=credentials.token_uri,
+            client_id=credentials.client_id,
+            client_secret=credentials.client_secret,
+        )
+    )
+    user_info = user_info_service.userinfo().get().execute()
+    email_google = user_info.get("email", "")
+
+    # Salvar tokens
+    expiry = credentials.expiry.isoformat() if credentials.expiry else None
+    await db.execute(sqlt("""
+        INSERT INTO google_tokens (id, usuario_id, access_token, refresh_token, token_expiry, email_google)
+        VALUES (gen_random_uuid(), :uid, :at, :rt, :exp, :email)
+        ON CONFLICT (usuario_id) DO UPDATE SET
+            access_token = :at,
+            refresh_token = COALESCE(:rt, google_tokens.refresh_token),
+            token_expiry = :exp,
+            email_google = :email,
+            atualizado_em = now()
+    """), {
+        "uid": state,
+        "at": credentials.token,
+        "rt": credentials.refresh_token,
+        "exp": expiry,
+        "email": email_google,
+    })
+    await db.commit()
+
+    # Redirecionar para o app com sucesso
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="https://tnorteando.cloud/agenda?google=conectado")
+
+
+@router.get("/auth/google/status", tags=["google"])
+async def google_status(
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Verifica se o usuário tem Google Calendar conectado."""
+    from sqlalchemy import text as sqlt
+    res = await db.execute(sqlt("""
+        SELECT email_google, token_expiry, atualizado_em
+        FROM google_tokens WHERE usuario_id = :uid
+    """), {"uid": str(current_user.id)})
+    row = res.fetchone()
+    if not row:
+        return {"conectado": False}
+    return {
+        "conectado": True,
+        "email_google": row[0],
+        "token_expiry": str(row[1]) if row[1] else None,
+        "atualizado_em": str(row[2]) if row[2] else None,
+    }
+
+
+@router.delete("/auth/google/disconnect", tags=["google"])
+async def google_disconnect(
+    current_user: Usuario = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove a conexão com o Google Calendar."""
+    from sqlalchemy import text as sqlt
+    await db.execute(sqlt(
+        "DELETE FROM google_tokens WHERE usuario_id = :uid"
+    ), {"uid": str(current_user.id)})
+    await db.commit()
+    return {"ok": True}
+
+
 @router.get("/agenda/esns", tags=["agenda"])
 async def listar_esns_do_cs(
     current_user: Usuario = Depends(get_current_user),
@@ -1710,6 +1877,70 @@ async def atualizar_horario_item(
     return {"ok": True}
 
 
+
+
+async def _criar_eventos_google(db, esn_id: str, agenda_id: str, itens: list):
+    """Cria eventos no Google Calendar do ESN para os itens publicados."""
+    import os
+    from sqlalchemy import text as sqlt
+    from datetime import datetime as dt, timedelta
+
+    res = await db.execute(sqlt(
+        "SELECT access_token, refresh_token, email_google FROM google_tokens WHERE usuario_id = :uid"
+    ), {"uid": esn_id})
+    row = res.fetchone()
+    if not row:
+        return
+
+    try:
+        import google.oauth2.credentials
+        import googleapiclient.discovery
+
+        creds = google.oauth2.credentials.Credentials(
+            token=row[0],
+            refresh_token=row[1],
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=os.environ.get("GOOGLE_CLIENT_ID", ""),
+            client_secret=os.environ.get("GOOGLE_CLIENT_SECRET", ""),
+        )
+        service = googleapiclient.discovery.build("calendar", "v3", credentials=creds)
+
+        for item in itens:
+            data_str = item.get("data", "")
+            horario = item.get("horario_previsto") or "08:00"
+            duracao = item.get("duracao_min", 45)
+            razao = item.get("razao_social", "Visita")
+            municipio = item.get("municipio", "") or ""
+            abc = item.get("classificacao_abc", "") or ""
+
+            try:
+                parts = horario.split(":")
+                h, m = int(parts[0]), int(parts[1])
+                inicio = dt.fromisoformat(data_str + "T" + horario + ":00")
+                fim = inicio + timedelta(minutes=duracao)
+                desc = "Cliente: " + razao + "\nClassificacao: " + abc + "\nMunicipio: " + municipio
+                evento = {
+                    "summary": "Visita - " + razao,
+                    "description": desc,
+                    "location": municipio,
+                    "start": {"dateTime": inicio.isoformat(), "timeZone": "America/Araguaina"},
+                    "end": {"dateTime": fim.isoformat(), "timeZone": "America/Araguaina"},
+                    "reminders": {"useDefault": False, "overrides": [{"method": "popup", "minutes": 30}]},
+                }
+                service.events().insert(calendarId="primary", body=evento).execute()
+            except Exception:
+                continue
+
+        if creds.token != row[0]:
+            await db.execute(sqlt(
+                "UPDATE google_tokens SET access_token = :at, atualizado_em = now() WHERE usuario_id = :uid"
+            ), {"at": creds.token, "uid": esn_id})
+            await db.commit()
+
+    except Exception:
+        pass
+
+
 @router.post("/agenda/{agenda_id}/publicar-itens", tags=["agenda"])
 async def publicar_itens_seletivos(
     agenda_id: UUID,
@@ -1773,6 +2004,27 @@ async def publicar_itens_seletivos(
         descricao=f"Publicação seletiva: {len(item_ids)} itens publicados",
         ip=request.client.host if request else None,
     )
+
+    # Criar eventos no Google Calendar do ESN (se conectado)
+    res_ag = await db.execute(sqlt(
+        "SELECT vendedor_id, data FROM agendas WHERE id = :id"
+    ), {"id": str(agenda_id)})
+    ag_row = res_ag.fetchone()
+    if ag_row:
+        res_itens_pub = await db.execute(sqlt("""
+            SELECT ai.horario_previsto, c.razao_social, c.municipio, c.classificacao_abc
+            FROM agenda_itens ai
+            JOIN clientes c ON c.id = ai.cliente_id
+            WHERE ai.agenda_id = :ag_id AND ai.publicado = true AND ai.status != 'CANCELADO'
+        """), {"ag_id": str(agenda_id)})
+        itens_pub = [
+            {"data": str(ag_row[1]), "horario_previsto": r[0], "razao_social": r[1],
+             "municipio": r[2], "classificacao_abc": r[3], "duracao_min": 45}
+            for r in res_itens_pub.fetchall()
+        ]
+        import asyncio
+        asyncio.create_task(_criar_eventos_google(db, str(ag_row[0]), str(agenda_id), itens_pub))
+
     return {"ok": True, "publicados": len(item_ids)}
 
 
