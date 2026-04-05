@@ -1116,9 +1116,9 @@ async def google_authorize(
     import os
     from google_auth_oauthlib.flow import Flow
 
-    client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
-    client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
-    redirect_uri = os.environ.get("GOOGLE_REDIRECT_URI", "")
+    client_id = settings.GOOGLE_CLIENT_ID or ""
+    client_secret = settings.GOOGLE_CLIENT_SECRET or ""
+    redirect_uri = settings.GOOGLE_REDIRECT_URI
 
     if not client_id or not client_secret:
         raise HTTPException(status_code=500, detail="Credenciais Google não configuradas.")
@@ -1162,9 +1162,9 @@ async def google_callback(
     from datetime import datetime as dt
     from sqlalchemy import text as sqlt
 
-    client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
-    client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
-    redirect_uri = os.environ.get("GOOGLE_REDIRECT_URI", "")
+    client_id = settings.GOOGLE_CLIENT_ID or ""
+    client_secret = settings.GOOGLE_CLIENT_SECRET or ""
+    redirect_uri = settings.GOOGLE_REDIRECT_URI
 
     flow = Flow.from_client_config(
         {
@@ -1900,8 +1900,8 @@ async def _criar_eventos_google(db, esn_id: str, agenda_id: str, itens: list):
             token=row[0],
             refresh_token=row[1],
             token_uri="https://oauth2.googleapis.com/token",
-            client_id=os.environ.get("GOOGLE_CLIENT_ID", ""),
-            client_secret=os.environ.get("GOOGLE_CLIENT_SECRET", ""),
+            client_id=settings.GOOGLE_CLIENT_ID or "",
+            client_secret=settings.GOOGLE_CLIENT_SECRET or "",
         )
         service = googleapiclient.discovery.build("calendar", "v3", credentials=creds)
 
